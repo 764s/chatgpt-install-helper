@@ -89,6 +89,8 @@ namespace ChatGPTInstaller
                     // 手动修复也保存启动目标；自动启动已先保存副本，与插件是否安装无关。
                     WriteText(Current, VersionString);
                     WriteText(Receipt, JsonData.Serialize(new { version = VersionString, codexHome = CodexHome(), installedPath = installedPath, installedAt = DateTime.UtcNow.ToString("o") }));
+                    if (previous != null && previous.Version < targetVersion)
+                        SidebarVersionRetention.Cleanup(Paths.Applications, Path.Combine(Paths.Sidebar, "versions"), VersionString, report);
                     report(previous == null ? "已作为 Codex 插件安装，今后可在 Codex 插件中操作，也可保留原 EXE 继续使用。" : "Codex 插件已更新至 " + VersionString + (force ? "，已完成修复并启用。" : "，原有" + (confirmed.Enabled ? "启用" : "停用") + "状态已保留。"));
                     return previous == null ? SidebarInstallStatus.Installed : SidebarInstallStatus.Updated;
                 }
@@ -154,8 +156,7 @@ namespace ChatGPTInstaller
 
         public static string PrepareLaunch()
         {
-            string target = DeployExecutable();
-            // 旧下载文件优先唤起已有新版，不能将侧栏降级到旧助手。
+            // 先尝试已有新版，避免双击旧下载文件时重新生成已清理的旧副本。
             if (File.Exists(Current))
             {
                 Version version;
@@ -168,6 +169,7 @@ namespace ChatGPTInstaller
                         fileVersion == new Version(version.Major, version.Minor, Math.Max(0, version.Build), Math.Max(0, version.Revision))) return newer;
                 }
             }
+            string target = DeployExecutable();
             // 固定副本是独立窗口和插件共同的启动目标；没有 Codex 时也可以保留或删除原下载文件。
             if (!File.Exists(Current) || File.ReadAllText(Current, Utf8).Trim() != VersionString) WriteText(Current, VersionString);
             return target;
@@ -191,9 +193,8 @@ namespace ChatGPTInstaller
         private static string DeployExecutable()
         {
             string source = Assembly.GetExecutingAssembly().Location;
-            string folder = Path.Combine(Paths.Applications, VersionString);
+            string folder = SidebarVersionRetention.CreateVersionDirectory(Paths.Applications, VersionString);
             string target = Path.Combine(folder, "ChatGPTInstaller.exe");
-            Directory.CreateDirectory(folder);
             if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
             {
                 byte[] expected = File.ReadAllBytes(source);
@@ -219,7 +220,8 @@ namespace ChatGPTInstaller
         {
             // 新版本先准备完整目录，再原子发布来源清单，旧插件始终引用完整的旧目录。
             string relativeRoot = "./versions/" + VersionString + "/" + PluginName;
-            string root = Path.Combine(Paths.Sidebar, "versions", VersionString, PluginName);
+            string versionRoot = SidebarVersionRetention.CreateVersionDirectory(Path.Combine(Paths.Sidebar, "versions"), VersionString);
+            string root = Path.Combine(versionRoot, PluginName);
             var presentation = new
             {
                 displayName = "ChatGPT 更新器", shortDescription = "直接查看版本与进度，下载更新，应用后自动重启。",

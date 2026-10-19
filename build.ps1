@@ -1,4 +1,4 @@
-param([string]$OutputPath = (Join-Path $PSScriptRoot '..\ChatGPTInstaller-1.6.5.exe'))
+param([string]$OutputPath = (Join-Path $PSScriptRoot '..\ChatGPTInstaller-1.6.6.exe'))
 $ErrorActionPreference = 'Stop'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) {

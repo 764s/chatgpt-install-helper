@@ -5,6 +5,6 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyDescription("独立下载、安装和更新官方 ChatGPT Windows 应用")]
 [assembly: AssemblyCompany("Personal utility - not affiliated with OpenAI")]
 [assembly: AssemblyProduct("ChatGPT Install Helper")]
-[assembly: AssemblyVersion("1.6.5.0")]
-[assembly: AssemblyFileVersion("1.6.5.0")]
+[assembly: AssemblyVersion("1.6.6.0")]
+[assembly: AssemblyFileVersion("1.6.6.0")]
 [assembly: ComVisible(false)]
