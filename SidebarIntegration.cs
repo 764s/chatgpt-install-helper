@@ -31,12 +31,12 @@ namespace ChatGPTInstaller
             Configure(report, true);
         }
 
-        public static SidebarInstallStatus EnsureInstalled(Action<string> report, Action installing)
+        public static SidebarInstallStatus EnsureInstalled(Action<string> report, Action<bool> installing)
         {
             return Configure(report, false, installing);
         }
 
-        private static SidebarInstallStatus Configure(Action<string> report, bool force, Action installing = null)
+        private static SidebarInstallStatus Configure(Action<string> report, bool force, Action<bool> installing = null)
         {
             using (var mutex = new Mutex(false, "Local\\ChatGPTInstallHelper-Sidebar"))
             {
@@ -49,8 +49,14 @@ namespace ChatGPTInstaller
                     var client = new CodexPluginClient();
                     if (!force && !client.IsAvailable) return SidebarInstallStatus.CodexNotFound;
                     report("正在检查 Codex 侧栏入口…");
-                    if (!force && client.IsPluginInstalled()) return SidebarInstallStatus.AlreadyInstalled;
-                    if (installing != null) installing();
+                    var previous = client.GetInstalledPlugin();
+                    var targetVersion = new Version(VersionString + ".0");
+                    if (previous != null && (previous.Version > targetVersion || (!force && previous.Version == targetVersion)))
+                    {
+                        report("Codex 插件版本为 " + previous.Version.ToString(3) + "，无需更新。");
+                        return SidebarInstallStatus.AlreadyInstalled;
+                    }
+                    if (installing != null) installing(previous != null);
                     report("正在确认 Codex 插件来源…");
                     client.HasOwnedMarketplace();
                     report("正在保存安装助手的独立副本…");
@@ -59,16 +65,32 @@ namespace ChatGPTInstaller
                     WritePlugin(target);
                     report("正在注册本地插件来源…");
                     client.Run("plugin", "marketplace", "add", Paths.Sidebar, "--json");
-                    report("正在安装并启用侧栏插件…");
-                    var installed = JsonData.Parse(client.Run("plugin", "add", Selector, "--json"));
-                    string installedPath = JsonData.Get(installed, "installedPath") as string;
-                    if (JsonData.Get(installed, "pluginId") as string != Selector || !HasSavedCommand(installedPath))
-                        throw new InvalidDataException("Codex 未返回此插件的安装确认，请稍后重新添加 / 修复入口。");
+                    string installedPath;
+                    // 手动添加 / 修复保留原有的重新安装并启用语义；自动升级只刷新缓存。
+                    if (previous == null || force)
+                    {
+                        report("正在安装并启用侧栏插件…");
+                        var installed = JsonData.Parse(client.Run("plugin", "add", Selector, "--json"));
+                        installedPath = JsonData.Get(installed, "installedPath") as string;
+                        if (JsonData.Get(installed, "pluginId") as string != Selector)
+                            throw new InvalidDataException("Codex 未返回此插件的安装确认，请稍后重新添加 / 修复入口。");
+                    }
+                    else
+                    {
+                        report("正在更新 Codex 插件：" + previous.Version.ToString(3) + " → " + VersionString + "，保留" + (previous.Enabled ? "启用" : "停用") + "状态…");
+                        installedPath = Path.Combine(CodexHome(), "plugins", "cache", MarketplaceName, PluginName, VersionString);
+                        client.RefreshInstalledPlugin(targetVersion, () => HasSavedCommand(installedPath));
+                    }
+                    var confirmed = client.GetInstalledPlugin();
+                    if (confirmed == null || confirmed.Version != targetVersion || !HasSavedCommand(installedPath))
+                        throw new InvalidDataException("未能核对插件版本与启动目标，本次配置尚未确认完成。可稍后重试添加 / 修复入口。");
+                    if (previous != null && !force && confirmed.Enabled != previous.Enabled)
+                        throw new InvalidDataException("插件启用状态在配置期间发生变化，请核对 Codex 中的开关；本工具未修改该开关。");
                     // 手动修复也保存启动目标；自动启动已先保存副本，与插件是否安装无关。
                     WriteText(Current, VersionString);
                     WriteText(Receipt, JsonData.Serialize(new { version = VersionString, codexHome = CodexHome(), installedPath = installedPath, installedAt = DateTime.UtcNow.ToString("o") }));
-                    report("已作为 Codex 插件安装，今后可在 Codex 插件中操作，也可保留原 EXE 继续使用。");
-                    return SidebarInstallStatus.Installed;
+                    report(previous == null ? "已作为 Codex 插件安装，今后可在 Codex 插件中操作，也可保留原 EXE 继续使用。" : "Codex 插件已更新至 " + VersionString + (force ? "，已完成修复并启用。" : "，原有" + (confirmed.Enabled ? "启用" : "停用") + "状态已保留。"));
+                    return previous == null ? SidebarInstallStatus.Installed : SidebarInstallStatus.Updated;
                 }
                 finally { mutex.ReleaseMutex(); }
             }
@@ -99,7 +121,7 @@ namespace ChatGPTInstaller
 
         public static string Status()
         {
-            if (!File.Exists(Receipt)) return "双击 EXE 会在后台检查：已有 Codex 且插件未安装时自动添加。也可点击“添加 / 修复入口”。";
+            if (!File.Exists(Receipt)) return "双击 EXE 会在后台检查：插件未安装时添加，已有旧版时升级，并保留启用 / 停用状态。也可点击“添加 / 修复入口”。";
             try
             {
                 var receipt = JsonData.Parse(File.ReadAllText(Receipt, Utf8));
@@ -195,7 +217,9 @@ namespace ChatGPTInstaller
 
         private static void WritePlugin(string executable)
         {
-            string root = Path.Combine(Paths.Sidebar, "plugins", PluginName);
+            // 新版本先准备完整目录，再原子发布来源清单，旧插件始终引用完整的旧目录。
+            string relativeRoot = "./versions/" + VersionString + "/" + PluginName;
+            string root = Path.Combine(Paths.Sidebar, "versions", VersionString, PluginName);
             var presentation = new
             {
                 displayName = "ChatGPT 更新器", shortDescription = "直接查看版本与进度，下载更新，应用后自动重启。",
@@ -226,7 +250,7 @@ namespace ChatGPTInstaller
             {
                 name = MarketplaceName,
                 @interface = new { displayName = "ChatGPT 安装助手" },
-                plugins = new[] { new { name = PluginName, source = new { source = "local", path = "./plugins/" + PluginName },
+                plugins = new[] { new { name = PluginName, source = new { source = "local", path = relativeRoot },
                     policy = new { installation = "AVAILABLE", authentication = "ON_INSTALL" }, category = "Productivity" } }
             }));
         }

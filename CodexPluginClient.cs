@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace ChatGPTInstaller
 {
@@ -81,7 +82,7 @@ namespace ChatGPTInstaller
             return false;
         }
 
-        public bool IsPluginInstalled()
+        public InstalledSidebarPlugin GetInstalledPlugin()
         {
             // 一次只读查询确认真实安装状态；不依赖可能过期的完成记录，也不要求来源仍已注册。
             var result = JsonData.Parse(Run(5000, "plugin", "list", "--json"));
@@ -90,11 +91,89 @@ namespace ChatGPTInstaller
             foreach (var value in installed)
             {
                 var plugin = value as Dictionary<string, object>;
-                // 已安装的旧版或被用户停用的插件不因双击而重装、升级或重新启用。
-                if (JsonData.Get(plugin, "pluginId") as string == SidebarIntegration.Selector &&
-                    object.Equals(JsonData.Get(plugin, "installed"), true)) return true;
+                if (JsonData.Get(plugin, "pluginId") as string != SidebarIntegration.Selector || !object.Equals(JsonData.Get(plugin, "installed"), true)) continue;
+                Version version;
+                object enabled = JsonData.Get(plugin, "enabled");
+                if (!Version.TryParse(JsonData.Get(plugin, "version") as string, out version) || !(enabled is bool))
+                    throw new InvalidDataException("无法确认已有插件的版本或启用状态，本次未覆盖插件。可稍后重试。");
+                return new InstalledSidebarPlugin(version, (bool)enabled);
             }
-            return false;
+            return null;
+        }
+
+        public void RefreshInstalledPlugin(Version targetVersion, Func<bool> cacheReady)
+        {
+            // plugin add 会重新启用插件；已有插件交给官方刷新流程，不写用户的启用开关。
+            var start = new ProcessStartInfo(executable, "app-server --stdio")
+            {
+                WorkingDirectory = Paths.Sidebar, UseShellExecute = false, CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden, RedirectStandardInput = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+            };
+            using (var process = Process.Start(start))
+            {
+                var error = process.StandardError.ReadToEndAsync();
+                var elapsed = Stopwatch.StartNew();
+                try
+                {
+                    var writer = process.StandardInput;
+                    writer.AutoFlush = true;
+                    writer.WriteLine(JsonData.Serialize(new { id = 1, method = "initialize", @params = new
+                    {
+                        clientInfo = new { name = "chatgpt-install-helper", version = SidebarIntegration.VersionString },
+                        capabilities = new { experimentalApi = true }
+                    } }));
+                    ReadReply(process, 1, elapsed);
+                    writer.WriteLine(JsonData.Serialize(new { method = "initialized", @params = new { } }));
+                    // 本地目录刷新会更新已配置插件的缓存；单独读取详情不会执行缓存刷新。
+                    writer.WriteLine(JsonData.Serialize(new { id = 2, method = "plugin/list", @params = new
+                    {
+                        forceRefetch = false, marketplaceKinds = new[] { "local" }
+                    } }));
+                    ReadReply(process, 2, elapsed);
+                    // 目录列表返回时缓存落盘可能仍在进行；保留辅助进程，直到真实安装记录就绪。
+                    while (elapsed.ElapsedMilliseconds < 15000)
+                    {
+                        var installed = GetInstalledPlugin();
+                        if (installed != null && installed.Version == targetVersion && cacheReady()) return;
+                        Thread.Sleep(100);
+                    }
+                    throw new TimeoutException("Codex 尚未完成新版插件缓存准备，可稍后重试；更新器仍可使用。");
+                }
+                catch (IOException ex)
+                {
+                    string detail = error.IsCompleted ? error.GetAwaiter().GetResult().Trim() : "";
+                    throw new IOException("Codex 插件刷新未完成。" + (detail.Length == 0 ? ex.Message : detail), ex);
+                }
+                finally
+                {
+                    // 只关闭本次配置使用的辅助进程，不连接或结束桌面端的任务进程。
+                    try { process.StandardInput.Close(); } catch (IOException) { }
+                    if (!process.WaitForExit(1000))
+                    {
+                        try { process.Kill(); } catch (InvalidOperationException) { }
+                    }
+                }
+            }
+        }
+
+        private static void ReadReply(Process process, int id, Stopwatch elapsed)
+        {
+            while (true)
+            {
+                int remaining = 15000 - (int)elapsed.ElapsedMilliseconds;
+                if (remaining <= 0) throw new TimeoutException("Codex 插件刷新等待超时，可稍后重试；更新器仍可使用。");
+                var line = process.StandardOutput.ReadLineAsync();
+                if (!line.Wait(remaining)) throw new TimeoutException("Codex 插件刷新等待超时，可稍后重试；更新器仍可使用。");
+                if (line.Result == null) throw new IOException("Codex 提前结束了插件刷新。");
+                var reply = JsonData.Parse(line.Result);
+                if (!object.Equals(JsonData.Get(reply, "id"), id)) continue;
+                var error = JsonData.Get(reply, "error") as Dictionary<string, object>;
+                if (error != null) throw new InvalidOperationException("Codex 插件刷新失败：" + (JsonData.Get(error, "message") as string ?? "未知错误"));
+                if (!(JsonData.Get(reply, "result") is Dictionary<string, object>)) throw new InvalidDataException("Codex 未返回插件刷新确认。");
+                return;
+            }
         }
 
         private static string Locate()

@@ -62,8 +62,12 @@ namespace ChatGPTInstaller
                 if (!created)
                 {
                     if (args.Length == 1 && args[0] == "--background") return 0;
-                    bool opened = LocalUpdateClient.TryOpenExisting();
-                    if (!opened) MessageBox.Show("检测到正在运行的更新器，但未能显示其窗口。请在当前操作结束后退出旧助手，再打开当前版本。", AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    IntPtr existingWindow;
+                    if (!LocalUpdateClient.TryOpenExisting(out existingWindow))
+                    {
+                        MessageBox.Show("检测到正在运行的更新器，但未能显示其窗口。请在当前操作结束后退出旧助手，再打开当前版本。", AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return 0;
+                    }
                     // 已有窗口先立即唤起；入口配置由这个独立进程完成，不阻塞已有下载或部署。
                     if (startup != null)
                     {
@@ -74,7 +78,7 @@ namespace ChatGPTInstaller
                             run = async delegate
                             {
                                 Application.Idle -= run;
-                                try { log.Write(await startup.CompleteWithNotice(null, log.Write)); }
+                                try { log.Write(await startup.CompleteWithNotice(null, log.Write, existingWindow)); }
                                 catch (Exception ex) { log.WriteTechnical(ex.ToString()); }
                                 finally { context.ExitThread(); }
                             };

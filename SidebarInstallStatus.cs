@@ -4,6 +4,7 @@ namespace ChatGPTInstaller
     {
         CodexNotFound,
         AlreadyInstalled,
-        Installed
+        Installed,
+        Updated
     }
 }

@@ -44,13 +44,14 @@ namespace ChatGPTInstaller
             }
         }
 
-        public static bool TryOpenExisting()
+        public static bool TryOpenExisting(out IntPtr window)
         {
+            window = IntPtr.Zero;
             try
             {
                 int serverProcessId = 0;
                 Send("open", false, 1000, 1500, processId => { serverProcessId = processId; WindowActivation.AllowForeground(processId); });
-                return serverProcessId != 0 && WindowActivation.ShowExisting(serverProcessId);
+                return serverProcessId != 0 && WindowActivation.ShowExisting(serverProcessId, out window);
             }
             catch (TimeoutException) { return false; }
             catch (IOException) { return false; }

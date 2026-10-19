@@ -1,9 +1,9 @@
-ChatGPT 安装助手 1.6.3 源码
+﻿ChatGPT 安装助手 1.6.5 源码
 
 这是 Windows Forms / C# 5 单文件 EXE 项目，使用 Windows 自带 .NET Framework 4.x 和 Windows PowerShell 5.1 组件，无 NuGet 依赖。
 
 编译：在 PowerShell 中运行本目录的 build.ps1。
-默认在上一级目录生成 ChatGPTInstaller-1.6.3.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
+默认在上一级目录生成 ChatGPTInstaller-1.6.5.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
 编译脚本使用系统内置 csc.exe；不需要 Visual Studio 或 .NET SDK。
 
 主要代码
@@ -20,8 +20,8 @@ UpdateChecker / UpdateCheckResult：独立的只读检查流程，读取本机�
 ChangelogParser / ReleaseNote / UpdateReport：解析官方桌面发布说明、按发布批次筛选累计内容，区分缺失、获取失败与确无待更新范围。
 DeploymentHelper / DeploymentRetry：需要部署时通过正常 UAC 启动独立辅助进程；再次验证输入并回传进度。明确的应用占用错误等待 5 秒后只重试一次，其他错误直接报告。
 PowerShellBridge：使用参数化命令调用系统 Appx / Dism 模块，不修改执行策略或信任设置。
-InstallerStartup / StartupNotice：原 EXE 保存并启动固定副本后退出，释放文件占用；窗口先打开，再在后台检查 Codex。只有检测到 Codex 且插件缺失才自动安装，开始与结束显示不阻塞窗口的独立浮层。后台 MCP / 插件更新 / 应用部署不执行自动添加。
-SidebarIntegration / CodexPluginClient：保存按版本隔离的助手副本，生成本地插件来源，调用随附 codex plugin marketplace add / plugin add / plugin remove 命令完成配置。自动流程只查询安装存在性，不重装已有旧版或启用被停用的插件。副本保存时记录启动目标，与插件安装状态分离；插件完成记录只在官方命令确认及缓存中的 MCP 目标核对通过后写入。
+InstallerStartup / StartupNotice：原 EXE 保存并启动固定副本后退出，释放文件占用；窗口先打开，再在后台检查 Codex。检测到 Codex 后，缺失则安装、旧版则升级、同版或更高版跳过；开始与结束显示不阻塞窗口的浮层，始终绑定本体客户区，跟随位置与显隐；复用旧后台时也传递同一主窗口句柄。后台 MCP / 插件更新 / 应用部署不执行自动添加。
+SidebarIntegration / CodexPluginClient：保存按版本隔离的助手副本，按版本准备完整插件目录后原子发布本地来源清单，调用随附 codex plugin marketplace add / plugin add / plugin remove 命令完成配置。自动流程读取真实版本及启用状态。同版或更高版只查询一次；旧版使用随附 app-server 的本地目录刷新，保持原启用状态，等待缓存落盘后核对版本与启动目标。副本保存时记录启动目标，与插件安装状态分离；插件完成记录只在官方命令确认及缓存中的 MCP 目标核对通过后写入。
 SidebarMcpServer / Sidebar/launcher.html：EXE 的 --mcp 模式提供标准 stdio MCP 服务与内嵌页面。页面直接展示状态并调用固定操作；写操作仅面向页面，不接受路径、命令或下载地址。
 SidebarUiResource：将程序集版本写入页面，再对完整 HTML 计算 SHA-256，作为工具声明与资源读取共用的 URI。内容变化会自动改变缓存标识；页面标题旁显示助手版本，避免宿主继续使用旧模板时无法分辨。
 WindowActivation：按管道服务器 PID 定位现有主窗口，显式恢复原生显示状态并核对可见性；新窗口也显式显示，避免 SW_HIDE 与托管 Visible 状态不同步。
@@ -65,3 +65,5 @@ WindowActivation：同版本重复打开时唤起已有窗口；其他版本仍�
 • 需要本机随附 Codex CLI 支持 plugin marketplace add / plugin add / plugin remove。找不到或不支持时明确提示，不下载额外运行时、不修改执行策略或公司策略。
 
 docs/使用说明.txt 包含系统要求、代理说明和已验证/未验证的范围。
+
+插件自动升级：只发布本工具的新版本目录，保留旧目录与下载缓存；通过 Codex 的本地目录刷新准备已配置插件，Codex 也可能同步刷新其他已配置本地插件的缓存。本工具不修改用户启用开关，不调用远程目录强制刷新。刷新失败不写完成记录，已发布来源保留供重试；已有缓存和正在运行的进程不清理。

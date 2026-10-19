@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -10,7 +11,7 @@ namespace ChatGPTInstaller
     {
         public static readonly uint Message = RegisterWindowMessage("ChatGPTInstallHelper.ShowWindow.v1");
 
-        public static bool ShowExisting(int processId)
+        public static bool ShowExisting(int processId, out IntPtr existingWindow)
         {
             IntPtr window = IntPtr.Zero;
             // 管道确定进程归属，窗口标题只筛选主窗体；不受旧版标题中的版本号影响。
@@ -25,6 +26,7 @@ namespace ChatGPTInstaller
                 window = candidate;
                 return false;
             }, IntPtr.Zero);
+            existingWindow = window;
             if (window == IntPtr.Zero) return false;
             // 兼容旧后台：托管 Visible 可能为 true，但首次 Show 被启动参数中的 SW_HIDE 覆盖。
             ShowWindowAsync(window, IsIconic(window) ? 9 : 5);
@@ -48,6 +50,34 @@ namespace ChatGPTInstaller
             form.Activate();
             SetForegroundWindow(form.Handle);
         }
+
+        public static bool TryGetClientBounds(IntPtr window, out Rectangle bounds)
+        {
+            bounds = Rectangle.Empty;
+            NativeRectangle rectangle;
+            Point origin = Point.Empty;
+            if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window) || !GetClientRect(window, out rectangle) || !ClientToScreen(window, ref origin)) return false;
+            bounds = new Rectangle(origin.X, origin.Y, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top);
+            return bounds.Width > 0 && bounds.Height > 0;
+        }
+
+        public static void ShowWithoutActivation(Form form)
+        {
+            // 提示也可能来自隐藏启动的辅助进程；明确显示，但不抢占主窗口焦点。
+            ShowWindow(form.Handle, 4);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRectangle
+        {
+            public int Left, Top, Right, Bottom;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool GetClientRect(IntPtr window, out NativeRectangle rectangle);
+
+        [DllImport("user32.dll")]
+        private static extern bool ClientToScreen(IntPtr window, ref Point point);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern uint RegisterWindowMessage(string text);

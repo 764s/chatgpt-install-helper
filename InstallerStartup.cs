@@ -19,6 +19,7 @@ namespace ChatGPTInstaller
         private readonly int launcherId;
         private readonly long launcherStartedAt;
         public bool ConfiguredThisTime { get; private set; }
+        public bool UpdatedThisTime { get; private set; }
         private string FileNotice { get { return launcherId > 0 ? "原 EXE 可安全删除，也可保留继续使用。" : "也可继续使用此窗口；请保留已安装目录中的文件。"; } }
 
         public InstallerStartup(int launcherId = 0, long launcherStartedAt = 0)
@@ -43,29 +44,31 @@ namespace ChatGPTInstaller
             return true;
         }
 
-        public async Task<string> CompleteWithNotice(Form owner, Action<string> report)
+        public async Task<string> CompleteWithNotice(Form owner, Action<string> report, IntPtr existingWindow = default(IntPtr))
         {
-            var notice = new StartupNotice();
+            var notice = new StartupNotice(owner == null ? existingWindow : owner.Handle);
             bool installing = false;
+            bool upgrading = false;
             var progress = new Progress<string>(message => { report(message); notice.Report(message); });
             var started = new Progress<bool>(value =>
             {
                 installing = true;
-                notice.Present(owner, "正在安装 Codex 插件", "安装期间可继续使用更新器。\n关闭此提示不会中断安装。", false);
+                upgrading = value;
+                notice.Present(value ? "正在更新 Codex 插件" : "正在安装 Codex 插件", "配置期间可继续使用更新器。\n关闭此提示不会中断操作。", false);
             });
             string result = null;
             Exception failure = null;
             try
             {
-                result = await Task.Run(() => Complete(message => ((IProgress<string>)progress).Report(message), () => ((IProgress<bool>)started).Report(true)));
-                if (ConfiguredThisTime) notice.Present(owner, "已作为 Codex 插件安装", "今后可在 Codex 插件中操作。\n" + FileNotice + "\n入口未显示时，等任务结束再重新打开 ChatGPT。", true);
+                result = await Task.Run(() => Complete(message => ((IProgress<string>)progress).Report(message), value => ((IProgress<bool>)started).Report(value)));
+                if (ConfiguredThisTime) notice.Present(UpdatedThisTime ? "Codex 插件已更新" : "已作为 Codex 插件安装", (UpdatedThisTime ? "已更新至 " + SidebarIntegration.VersionString + "，启用 / 停用状态已保留。" : "今后可在 Codex 插件中操作。") + "\n" + FileNotice + "\n入口未刷新时，等任务结束再重新打开 ChatGPT。", true);
                 else notice.Dispose();
             }
             catch (Exception ex)
             {
                 failure = ex;
                 report(ex.Message);
-                notice.Present(owner, installing ? "Codex 插件安装未完成" : "Codex 插件检查未完成", ex.Message + "\n更新器仍可正常使用，可在“Codex 侧栏入口”中重试。", true);
+                notice.Present(installing ? (upgrading ? "Codex 插件更新未完成" : "Codex 插件安装未完成") : "Codex 插件检查未完成", ex.Message + "\n更新器仍可正常使用，可在“Codex 侧栏入口”中重试。", true);
             }
             // 已有更新器时，此独立进程只承载提示；等待提示关闭，不占用已有窗口的线程。
             if (owner == null && !notice.IsDisposed) await notice.Dismissed;
@@ -73,16 +76,19 @@ namespace ChatGPTInstaller
             return result;
         }
 
-        public string Complete(Action<string> report, Action installing)
+        public string Complete(Action<string> report, Action<bool> installing)
         {
             WaitForLauncher();
             SidebarInstallStatus status = SidebarIntegration.EnsureInstalled(report, installing);
-            ConfiguredThisTime = status == SidebarInstallStatus.Installed;
+            UpdatedThisTime = status == SidebarInstallStatus.Updated;
+            ConfiguredThisTime = status == SidebarInstallStatus.Installed || UpdatedThisTime;
+            if (UpdatedThisTime)
+                return "Codex 插件已更新至 " + SidebarIntegration.VersionString + "，启用 / 停用状态已保留。\n" + FileNotice;
             if (ConfiguredThisTime)
                 return "已作为 Codex 插件安装，今后可在 Codex 插件中操作。\n" + FileNotice;
             if (status == SidebarInstallStatus.CodexNotFound)
                 return "未检测到 Codex，可直接使用更新器。\n" + FileNotice;
-            return "Codex 插件已安装，无需重复安装。\n" + FileNotice;
+            return "Codex 插件已是当前版本或更高版本，无需更新。\n" + FileNotice;
         }
 
         private void WaitForLauncher()

@@ -235,7 +235,7 @@ namespace ChatGPTInstaller
             var explanation = new Label
             {
                 AutoSize = true, Margin = new Padding(0, 0, 0, 10),
-                Text = "双击 EXE 后，已有 Codex 且插件未安装时会在后台自动添加；已安装则直接使用。\n首次添加后，等当前任务结束再重新打开 ChatGPT，在侧栏“更多”中找到“ChatGPT 更新器”并固定。\n页面直接显示版本和进度，默认下载后等待应用；可勾选本次自动安装并重启。正常更新和覆盖重装会保留入口。"
+                Text = "双击 EXE 后，插件未安装时自动添加，旧版自动升级，同版或更高版直接使用；保留启用 / 停用状态。\n安装或升级后，等当前任务结束再重新打开 ChatGPT，以加载新入口。首次使用可在侧栏“更多”中找到“ChatGPT 更新器”并固定。\n页面直接显示版本和进度，默认下载后等待应用；可勾选本次自动安装并重启。正常更新和覆盖重装会保留入口。\n下方“添加 / 修复入口”会主动重新安装并启用插件。"
             };
             content.Controls.Add(explanation);
             var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 10) };
