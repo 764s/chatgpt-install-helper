@@ -1,9 +1,9 @@
-ChatGPT 安装助手 1.6.1 源码
+ChatGPT 安装助手 1.6.2 源码
 
 这是 Windows Forms / C# 5 单文件 EXE 项目，使用 Windows 自带 .NET Framework 4.x 和 Windows PowerShell 5.1 组件，无 NuGet 依赖。
 
 编译：在 PowerShell 中运行本目录的 build.ps1。
-默认在上一级目录生成 ChatGPTInstaller-1.6.1.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
+默认在上一级目录生成 ChatGPTInstaller-1.6.2.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
 编译脚本使用系统内置 csc.exe；不需要 Visual Studio 或 .NET SDK。
 
 主要代码
@@ -20,7 +20,8 @@ UpdateChecker / UpdateCheckResult：独立的只读检查流程，读取本机�
 ChangelogParser / ReleaseNote / UpdateReport：解析官方桌面发布说明、按发布批次筛选累计内容，区分缺失、获取失败与确无待更新范围。
 DeploymentHelper / DeploymentRetry：需要部署时通过正常 UAC 启动独立辅助进程；再次验证输入并回传进度。明确的应用占用错误等待 5 秒后只重试一次，其他错误直接报告。
 PowerShellBridge：使用参数化命令调用系统 Appx / Dism 模块，不修改执行策略或信任设置。
-SidebarIntegration / CodexPluginClient：保存按版本隔离的助手副本，生成本地插件来源，调用随附 codex plugin marketplace add / plugin add / plugin remove 命令完成配置。固定的插件身份保留启用状态，当前副本指针在插件安装确认后切换。
+InstallerStartup / StartupNotice：原 EXE 保存并启动固定副本后退出，释放文件占用；窗口先打开，再在后台检查 Codex。只有检测到 Codex 且插件缺失才自动安装，开始与结束显示不阻塞窗口的独立浮层。后台 MCP / 插件更新 / 应用部署不执行自动添加。
+SidebarIntegration / CodexPluginClient：保存按版本隔离的助手副本，生成本地插件来源，调用随附 codex plugin marketplace add / plugin add / plugin remove 命令完成配置。自动流程只查询安装存在性，不重装已有旧版或启用被停用的插件。副本保存时记录启动目标，与插件安装状态分离；插件完成记录只在官方命令确认及缓存中的 MCP 目标核对通过后写入。
 SidebarMcpServer / Sidebar/launcher.html：EXE 的 --mcp 模式提供标准 stdio MCP 服务与内嵌页面。页面直接展示状态并调用固定操作；写操作仅面向页面，不接受路径、命令或下载地址。
 SidebarUiResource：将程序集版本写入页面，再对完整 HTML 计算 SHA-256，作为工具声明与资源读取共用的 URI。内容变化会自动改变缓存标识；页面标题旁显示助手版本，避免宿主继续使用旧模板时无法分辨。
 LocalUpdateClient / LocalUpdateServer：同用户命名管道连接唯一的助手进程，所有操作回到 MainForm 的同一套状态与 InstallerWorkflow，窗口和页面不会各自下载或同时部署。
@@ -55,7 +56,8 @@ WindowActivation：同版本重复打开时唤起已有窗口；其他版本仍�
 • 检查结论针对官方生产渠道当前公布的版本；应用内待安装和待重启状态需在完成更新后刷新。官方网页结构不再可识别时明确报告说明获取失败。
 • 侧栏采用官方全局 MCP App 入口，位置由客户端管理。页面直接检查、下载和应用更新，底部小灰字“打开所在文件夹”打开当前更新器副本的文件夹；需要完整窗口时可从该文件夹双击 EXE。不接管官方更新蓝点，不依赖项目配置。
 • 插件来源保存在 %LOCALAPPDATA%\ChatGPTInstallHelper\Sidebar，助手副本在 App\{version}。不放入 ChatGPT 安装目录、下载 Cache 或临时文件夹；应用更新和覆盖重装不会清理这些目录。
-• 用户主动添加 / 修复时才更新侧栏配置；安装 ChatGPT 不隐式重装插件，用户停用或移除入口不会在下次更新时被自动恢复。
+• 直接双击 EXE 时后台检测 Codex，只在插件缺失时自动添加；插件已安装、版本较旧或已停用时保持现状，升级 / 修复由用户显式点击。仅查已知组件目录和当前用户应用包，不遍历全盘；插件查询上限 5 秒，超时明确报告且不继续安装。插件内操作不执行检测或注册，更新 ChatGPT 也不隐式重装插件。
+• 开始安装前显示浮层，完成后立即报告可用入口和原文件处理方式；浮层不修改原有界面布局、不阻塞更新，结果 15 秒后收起。关闭进行中的浮层只隐藏提示，安装仍继续，结果会再次显示。
 • 原生命令负责更新 Codex 用户配置与插件缓存，不手写或整体覆盖 config.toml。发现同名来源指向其他目录时停止；重复添加和移除可重试。添加失败保留已准备资源便于再次修复，只有确认安装成功才写完成记录。
 • 移除侧栏入口仅移除本插件和专用来源；保留独立助手、下载缓存与日志。不会强制重启 ChatGPT；客户端需要重新加载插件时由用户选择时机。
 • MCP 使用固定工具及按页面内容生成的资源 URI，严格拒绝额外工具参数和未知资源。只声明页面与工具能力，不监听网络端口或安装开机启动项；后台桥接进程由 Codex 管理。

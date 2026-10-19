@@ -42,7 +42,15 @@ namespace ChatGPTInstaller
             }
         }
 
-        private static object Send(string command, bool autoInstall, int timeout)
+        public static bool TryOpenExisting()
+        {
+            try { Send("open", false, 500, 1000); return true; }
+            catch (TimeoutException) { return false; }
+            catch (IOException) { return false; }
+            catch (InvalidOperationException) { return false; }
+        }
+
+        private static object Send(string command, bool autoInstall, int timeout, int responseTimeout = 15000)
         {
             using (var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
             {
@@ -51,7 +59,7 @@ namespace ChatGPTInstaller
                 var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, true);
                 writer.WriteLine(JsonData.Serialize(new { command = command, autoInstall = autoInstall }));
                 var read = reader.ReadLineAsync();
-                if (!read.Wait(15000)) throw new IOException("更新器暂时没有响应，请稍后重试。");
+                if (!read.Wait(responseTimeout)) throw new IOException("更新器暂时没有响应，请稍后重试。");
                 string line = read.GetAwaiter().GetResult();
                 if (line == null || line.Length > 128 * 1024) throw new IOException("更新器返回了无效状态。");
                 var reply = JsonData.Parse(line);

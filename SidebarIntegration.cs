@@ -24,18 +24,34 @@ namespace ChatGPTInstaller
         public static string VersionString { get { return Assembly.GetExecutingAssembly().GetName().Version.ToString(3); } }
         private static string Receipt { get { return Path.Combine(Paths.Sidebar, "integration.json"); } }
         private static string Current { get { return Path.Combine(Paths.Applications, "current.txt"); } }
+        private static string SavedExecutable { get { return Path.Combine(Paths.Applications, VersionString, "ChatGPTInstaller.exe"); } }
 
         public static void Install(Action<string> report)
+        {
+            Configure(report, true);
+        }
+
+        public static SidebarInstallStatus EnsureInstalled(Action<string> report, Action installing)
+        {
+            return Configure(report, false, installing);
+        }
+
+        private static SidebarInstallStatus Configure(Action<string> report, bool force, Action installing = null)
         {
             using (var mutex = new Mutex(false, "Local\\ChatGPTInstallHelper-Sidebar"))
             {
                 bool locked;
-                try { locked = mutex.WaitOne(0); } catch (AbandonedMutexException) { locked = true; }
+                try { locked = mutex.WaitOne(force ? 0 : 5000); } catch (AbandonedMutexException) { locked = true; }
                 if (!locked) throw new InvalidOperationException("另一个窗口正在配置侧栏入口，请等待完成。");
                 try
                 {
                     Directory.CreateDirectory(Paths.Sidebar);
                     var client = new CodexPluginClient();
+                    if (!force && !client.IsAvailable) return SidebarInstallStatus.CodexNotFound;
+                    report("正在检查 Codex 侧栏入口…");
+                    if (!force && client.IsPluginInstalled()) return SidebarInstallStatus.AlreadyInstalled;
+                    if (installing != null) installing();
+                    report("正在确认 Codex 插件来源…");
                     client.HasOwnedMarketplace();
                     report("正在保存安装助手的独立副本…");
                     string target = DeployExecutable();
@@ -45,12 +61,14 @@ namespace ChatGPTInstaller
                     client.Run("plugin", "marketplace", "add", Paths.Sidebar, "--json");
                     report("正在安装并启用侧栏插件…");
                     var installed = JsonData.Parse(client.Run("plugin", "add", Selector, "--json"));
-                    if (JsonData.Get(installed, "pluginId") as string != Selector || string.IsNullOrWhiteSpace(JsonData.Get(installed, "installedPath") as string))
+                    string installedPath = JsonData.Get(installed, "installedPath") as string;
+                    if (JsonData.Get(installed, "pluginId") as string != Selector || !HasSavedCommand(installedPath))
                         throw new InvalidDataException("Codex 未返回此插件的安装确认，请稍后重新添加 / 修复入口。");
-                    // 注册成功后才切换启动目标；正在运行的旧桥接进程也能打开新版助手。
+                    // 手动修复也保存启动目标；自动启动已先保存副本，与插件是否安装无关。
                     WriteText(Current, VersionString);
-                    WriteText(Receipt, JsonData.Serialize(new { version = VersionString, codexHome = CodexHome(), installedAt = DateTime.UtcNow.ToString("o") }));
-                    report("侧栏插件已安装。等任务结束后重新打开 ChatGPT，在侧栏“更多”中找到“ChatGPT 更新器”并固定。");
+                    WriteText(Receipt, JsonData.Serialize(new { version = VersionString, codexHome = CodexHome(), installedPath = installedPath, installedAt = DateTime.UtcNow.ToString("o") }));
+                    report("已作为 Codex 插件安装，今后可在 Codex 插件中操作，也可保留原 EXE 继续使用。");
+                    return SidebarInstallStatus.Installed;
                 }
                 finally { mutex.ReleaseMutex(); }
             }
@@ -81,7 +99,7 @@ namespace ChatGPTInstaller
 
         public static string Status()
         {
-            if (!File.Exists(Receipt)) return "尚无完成记录。点击“添加 / 修复入口”即可配置。";
+            if (!File.Exists(Receipt)) return "双击 EXE 会在后台检查：已有 Codex 且插件未安装时自动添加。也可点击“添加 / 修复入口”。";
             try
             {
                 var receipt = JsonData.Parse(File.ReadAllText(Receipt, Utf8));
@@ -112,6 +130,42 @@ namespace ChatGPTInstaller
             return executable;
         }
 
+        public static string PrepareLaunch()
+        {
+            string target = DeployExecutable();
+            // 旧下载文件优先唤起已有新版，不能将侧栏降级到旧助手。
+            if (File.Exists(Current))
+            {
+                Version version;
+                string value = File.ReadAllText(Current, Utf8).Trim();
+                if (Version.TryParse(value, out version) && version.ToString() == value && version > new Version(VersionString))
+                {
+                    string newer = Path.Combine(Paths.Applications, value, "ChatGPTInstaller.exe");
+                    Version fileVersion;
+                    if (File.Exists(newer) && Version.TryParse(FileVersionInfo.GetVersionInfo(newer).FileVersion, out fileVersion) &&
+                        fileVersion == new Version(version.Major, version.Minor, Math.Max(0, version.Build), Math.Max(0, version.Revision))) return newer;
+                }
+            }
+            // 固定副本是独立窗口和插件共同的启动目标；没有 Codex 时也可以保留或删除原下载文件。
+            if (!File.Exists(Current) || File.ReadAllText(Current, Utf8).Trim() != VersionString) WriteText(Current, VersionString);
+            return target;
+        }
+
+        private static bool HasSavedCommand(string pluginPath)
+        {
+            if (string.IsNullOrWhiteSpace(pluginPath)) return false;
+            foreach (string name in new[] { "mcp.json", ".mcp.json" })
+            {
+                string path = Path.Combine(pluginPath, name);
+                if (!File.Exists(path)) return false;
+                var configuration = JsonData.Parse(File.ReadAllText(path, Utf8));
+                var servers = JsonData.Get(configuration, "mcpServers") as Dictionary<string, object>;
+                var server = JsonData.Get(servers, "chatgpt-updater") as Dictionary<string, object>;
+                if (!string.Equals(JsonData.Get(server, "command") as string, SavedExecutable, StringComparison.OrdinalIgnoreCase)) return false;
+            }
+            return true;
+        }
+
         private static string DeployExecutable()
         {
             string source = Assembly.GetExecutingAssembly().Location;
@@ -126,7 +180,15 @@ namespace ChatGPTInstaller
                     if (!EqualBytes(expected, File.ReadAllBytes(target)))
                         throw new IOException("同版本的独立副本内容不同。请先关闭旧助手后使用新的版本号发布，避免替换正在运行的程序。");
                 }
-                else WriteBytes(target, expected);
+                else
+                {
+                    try { WriteBytes(target, expected, false); }
+                    catch (IOException)
+                    {
+                        // 同时双击时另一进程可能已发布相同副本；只接受内容完全一致的结果。
+                        if (!File.Exists(target) || !EqualBytes(expected, File.ReadAllBytes(target))) throw;
+                    }
+                }
             }
             return target;
         }
@@ -187,14 +249,14 @@ namespace ChatGPTInstaller
             WriteBytes(path, Utf8.GetBytes(value));
         }
 
-        private static void WriteBytes(string path, byte[] value)
+        private static void WriteBytes(string path, byte[] value, bool replaceExisting = true)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 File.WriteAllBytes(temporary, value);
-                if (File.Exists(path)) File.Replace(temporary, path, null);
+                if (replaceExisting && File.Exists(path)) File.Replace(temporary, path, null);
                 else File.Move(temporary, path);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }

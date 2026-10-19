@@ -9,9 +9,9 @@ namespace ChatGPTInstaller
         private readonly Timer idleTimer;
         private readonly MainForm form;
 
-        public UpdaterApplicationContext(bool background)
+        public UpdaterApplicationContext(bool background, InstallerStartup startup = null)
         {
-            form = new MainForm(background);
+            form = new MainForm(background, startup);
             // 不赋给 ApplicationContext.MainForm，避免消息循环强制显示后台窗口。
             form.FormClosed += delegate { ExitThread(); };
             IntPtr handle = form.Handle;

@@ -23,8 +23,16 @@ namespace ChatGPTInstaller
             executable = Locate();
         }
 
+        public bool IsAvailable { get { return executable != null; } }
+
         public string Run(params string[] arguments)
         {
+            return Run(60000, arguments);
+        }
+
+        private string Run(int timeout, params string[] arguments)
+        {
+            if (!IsAvailable) throw new FileNotFoundException("未找到 ChatGPT 随附的 Codex 组件。请先安装并打开一次新版 ChatGPT，再添加侧栏入口。");
             var start = new ProcessStartInfo(executable, string.Join(" ", arguments.Select(Quote)))
             {
                 WorkingDirectory = Paths.Sidebar,
@@ -40,7 +48,7 @@ namespace ChatGPTInstaller
             {
                 var output = process.StandardOutput.ReadToEndAsync();
                 var error = process.StandardError.ReadToEndAsync();
-                if (!process.WaitForExit(60000))
+                if (!process.WaitForExit(timeout))
                 {
                     // 只结束本次插件命令，不影响正在执行任务的 Codex 进程。
                     try { process.Kill(); } catch (InvalidOperationException) { }
@@ -56,7 +64,7 @@ namespace ChatGPTInstaller
 
         public bool HasOwnedMarketplace()
         {
-            var result = JsonData.Parse(Run("plugin", "marketplace", "list", "--json"));
+            var result = JsonData.Parse(Run(5000, "plugin", "marketplace", "list", "--json"));
             var marketplaces = JsonData.Get(result, "marketplaces") as IEnumerable;
             if (marketplaces == null) throw new InvalidDataException("Codex 返回的插件来源格式已变化，请更新安装助手。");
             foreach (var value in marketplaces)
@@ -69,6 +77,22 @@ namespace ChatGPTInstaller
                 if (!string.Equals(Path.GetFullPath(root).TrimEnd('\\'), Path.GetFullPath(Paths.Sidebar).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("已有同名插件来源指向其他目录。为保留现有配置，本次未覆盖或移除该来源。");
                 return true;
+            }
+            return false;
+        }
+
+        public bool IsPluginInstalled()
+        {
+            // 一次只读查询确认真实安装状态；不依赖可能过期的完成记录，也不要求来源仍已注册。
+            var result = JsonData.Parse(Run(5000, "plugin", "list", "--json"));
+            var installed = JsonData.Get(result, "installed") as IEnumerable;
+            if (installed == null) throw new InvalidDataException("Codex 返回的插件安装状态格式已变化，请更新安装助手。");
+            foreach (var value in installed)
+            {
+                var plugin = value as Dictionary<string, object>;
+                // 已安装的旧版或被用户停用的插件不因双击而重装、升级或重新启用。
+                if (JsonData.Get(plugin, "pluginId") as string == SidebarIntegration.Selector &&
+                    object.Equals(JsonData.Get(plugin, "installed"), true)) return true;
             }
             return false;
         }
@@ -93,7 +117,7 @@ namespace ChatGPTInstaller
                     if (File.Exists(bundled)) return bundled;
                 }
             }
-            throw new FileNotFoundException("未找到 ChatGPT 随附的 Codex 组件。请先安装并打开一次新版 ChatGPT，再添加侧栏入口。");
+            return null;
         }
 
         private static string Quote(string value)

@@ -40,6 +40,8 @@ namespace ChatGPTInstaller
         private bool preparing;
         private bool confirming;
         private bool integrating;
+        private bool startupConfiguring;
+        private bool closeAfterStartup;
         private PreparedInstallation prepared;
         private PackageCacheInfo cacheStatus;
         private bool installedAvailable;
@@ -60,7 +62,7 @@ namespace ChatGPTInstaller
         private UiStatus lastStatus = new UiStatus("准备检查更新", "", 0);
         private readonly string sidebarSessionId = Guid.NewGuid().ToString("N");
 
-        public MainForm(bool background = false)
+        public MainForm(bool background = false, InstallerStartup startup = null)
         {
             backgroundMode = background;
             Text = AppInfo.ProductName;
@@ -191,7 +193,12 @@ namespace ChatGPTInstaller
             openNotes.LinkClicked += delegate { try { Process.Start(new ProcessStartInfo(AppInfo.Changelog) { UseShellExecute = true }); } catch (Exception ex) { log.Write(ex.Message); } };
             logs.LinkClicked += delegate { try { Process.Start(new ProcessStartInfo(log.FilePath) { UseShellExecute = true }); } catch (Exception ex) { log.Write(ex.Message); } };
             launch.Click += delegate { OpenChatGPT(); };
-            Shown += async delegate { if (!busy && currentVersionText == null) await CheckOnly(); };
+            Shown += async delegate
+            {
+                Task setup = startup == null ? Task.FromResult(0) : InitializeSidebar(startup);
+                if (!busy && currentVersionText == null) await CheckOnly();
+                await setup;
+            };
             FormClosing += delegate(object sender, FormClosingEventArgs args)
             {
                 if (!exitBackground && args.CloseReason == CloseReason.UserClosing && (backgroundMode || sidebarConnected))
@@ -200,7 +207,11 @@ namespace ChatGPTInstaller
                     Hide();
                     return;
                 }
-                if (!busy) return;
+                if (!busy)
+                {
+                    if (startupConfiguring) { args.Cancel = true; closeAfterStartup = true; Hide(); }
+                    return;
+                }
                 args.Cancel = true;
                 if (integrating) { closeAfterCancel = true; detail.Text = "正在配置侧栏入口，完成后关闭窗口。"; }
                 else if (deploying) detail.Text = "Windows 正在安装，请等待完成后关闭窗口。";
@@ -224,7 +235,7 @@ namespace ChatGPTInstaller
             var explanation = new Label
             {
                 AutoSize = true, Margin = new Padding(0, 0, 0, 10),
-                Text = "首次添加后，等当前任务结束再重新打开 ChatGPT，在侧栏“更多”中找到“ChatGPT 更新器”并固定。\n页面直接显示版本和进度，默认下载后等待应用；可勾选本次自动安装并重启。正常更新和覆盖重装会保留入口。"
+                Text = "双击 EXE 后，已有 Codex 且插件未安装时会在后台自动添加；已安装则直接使用。\n首次添加后，等当前任务结束再重新打开 ChatGPT，在侧栏“更多”中找到“ChatGPT 更新器”并固定。\n页面直接显示版本和进度，默认下载后等待应用；可勾选本次自动安装并重启。正常更新和覆盖重装会保留入口。"
             };
             content.Controls.Add(explanation);
             var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 10) };
@@ -248,7 +259,7 @@ namespace ChatGPTInstaller
 
         private async Task ConfigureSidebar(bool remove)
         {
-            if (busy) return;
+            if (busy || startupConfiguring) return;
             integrating = true;
             SetBusy(true);
             string result = "";
@@ -281,6 +292,30 @@ namespace ChatGPTInstaller
                 integrating = false;
                 SetBusy(false);
                 if (closeAfterCancel) Close();
+            }
+        }
+
+        private async Task InitializeSidebar(InstallerStartup startup)
+        {
+            startupConfiguring = true;
+            addSidebar.Enabled = removeSidebar.Enabled = false;
+            try
+            {
+                string notice = await startup.CompleteWithNotice(this, message => { sidebarStatus.Text = message; log.Write(message); });
+                sidebarStatus.Text = notice + (startup.ConfiguredThisTime ? "\n等当前任务结束后重新打开 ChatGPT，以加载侧栏入口。" : "");
+                log.Write(notice);
+            }
+            catch (Exception ex)
+            {
+                sidebarStatus.Text = "侧栏配置未完成：" + ex.Message;
+                log.Write(sidebarStatus.Text);
+                log.WriteTechnical(ex.ToString());
+            }
+            finally
+            {
+                startupConfiguring = false;
+                addSidebar.Enabled = removeSidebar.Enabled = !busy;
+                if (closeAfterStartup) Close();
             }
         }
 
@@ -539,8 +574,8 @@ namespace ChatGPTInstaller
             busy = value;
             foreach (var button in new[] { install, update, check }) button.SetRunningState(value, button == activeAction, actionText);
             network.Enabled = !value;
-            addSidebar.Enabled = !value;
-            removeSidebar.Enabled = !value;
+            addSidebar.Enabled = !value && !startupConfiguring;
+            removeSidebar.Enabled = !value && !startupConfiguring;
             cancel.Visible = value && cancellation != null;
             cancel.Enabled = value && cancellation != null && !deploying && !cancellation.IsCancellationRequested;
             RefreshPreparedControls();
@@ -686,7 +721,7 @@ namespace ChatGPTInstaller
 
         internal bool CanExitBackground()
         {
-            return !Visible && !busy && DateTime.UtcNow - lastSidebarRequest > TimeSpan.FromMinutes(2);
+            return !Visible && !busy && !startupConfiguring && DateTime.UtcNow - lastSidebarRequest > TimeSpan.FromMinutes(2);
         }
 
         internal void ExitBackground()
