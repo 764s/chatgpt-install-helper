@@ -1,0 +1,64 @@
+ChatGPT 安装助手 1.6.1 源码
+
+这是 Windows Forms / C# 5 单文件 EXE 项目，使用 Windows 自带 .NET Framework 4.x 和 Windows PowerShell 5.1 组件，无 NuGet 依赖。
+
+编译：在 PowerShell 中运行本目录的 build.ps1。
+默认在上一级目录生成 ChatGPTInstaller-1.6.1.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
+编译脚本使用系统内置 csc.exe；不需要 Visual Studio 或 .NET SDK。
+
+主要代码
+MainForm / ProxyDialog：中文界面、安装/更新/仅检查三个入口、准备就绪后的独立安装按钮、实时进度、发布说明、日志与网络设置。
+OperationButton：按当前操作切换高亮与禁用样式，保持执行中按钮的文字对比度。
+RunLog：界面保留本次操作的简明记录；完整文件保存历次操作和异常堆栈，可打开或复制。
+ReleaseResolver / ReleaseManifest：实时读取官方生产渠道 windows-store-update.json，验证结构、产品和四段 Windows 版本，再构建 releases/{buildVersion}/ChatGPT-{architecture}.msix。与本机官方 App 的版本发现和包地址规则一致。
+NetworkClient / ProxyRoute：HTTPS、代理、ETag 范围下载、重试、取消与续传。
+PackageCache / PackageCacheInfo：版本检查与下载共用缓存选择段。实时目标下优先选择助手完整缓存，再选择版本、架构和长度匹配的官方完整缓存；其余保持未下载或助手续传状态。仅检查只读取状态，实际准备才校验签名并引用包。
+CacheFiles：同卷硬链接、同目录原子换名，以及写入前检查文件是否有多个硬链接。发布不合并旧文件元数据；下载不截断或续写共享文件。
+PackageInfo / SignatureVerifier：包身份、架构、系统要求、许可证与 Windows 签名校验。
+InstallerWorkflow / PreparedInstallation：Prepare 只查询、下载和校验，返回准备状态；用户点击应用更新或勾选本次自动安装后才调用 InstallPrepared，重新核对版本与缓存，再部署和确认结果。
+UpdateChecker / UpdateCheckResult：独立的只读检查流程，读取本机版本及官方元数据，不进入下载和部署流程。
+ChangelogParser / ReleaseNote / UpdateReport：解析官方桌面发布说明、按发布批次筛选累计内容，区分缺失、获取失败与确无待更新范围。
+DeploymentHelper / DeploymentRetry：需要部署时通过正常 UAC 启动独立辅助进程；再次验证输入并回传进度。明确的应用占用错误等待 5 秒后只重试一次，其他错误直接报告。
+PowerShellBridge：使用参数化命令调用系统 Appx / Dism 模块，不修改执行策略或信任设置。
+SidebarIntegration / CodexPluginClient：保存按版本隔离的助手副本，生成本地插件来源，调用随附 codex plugin marketplace add / plugin add / plugin remove 命令完成配置。固定的插件身份保留启用状态，当前副本指针在插件安装确认后切换。
+SidebarMcpServer / Sidebar/launcher.html：EXE 的 --mcp 模式提供标准 stdio MCP 服务与内嵌页面。页面直接展示状态并调用固定操作；写操作仅面向页面，不接受路径、命令或下载地址。
+SidebarUiResource：将程序集版本写入页面，再对完整 HTML 计算 SHA-256，作为工具声明与资源读取共用的 URI。内容变化会自动改变缓存标识；页面标题旁显示助手版本，避免宿主继续使用旧模板时无法分辨。
+LocalUpdateClient / LocalUpdateServer：同用户命名管道连接唯一的助手进程，所有操作回到 MainForm 的同一套状态与 InstallerWorkflow，窗口和页面不会各自下载或同时部署。
+ExplorerLauncher：取得桌面 Explorer 的 Shell 自动化对象并由它创建助手，避免助手成为 MCP 子进程而随宿主关闭。
+UpdaterApplicationContext：允许助手隐藏运行；客户端通过桌面 Shell 启动独立进程，应用更新退出 ChatGPT 后仍由它核对结果和请求重新打开。关闭侧栏或隐藏完整窗口不取消已开始的工作；隐藏且空闲、页面停止访问两分钟后退出，缓存保留。
+WindowActivation：同版本重复打开时唤起已有窗口；其他版本仍提示先关闭旧助手。
+
+行为边界
+• 不使用 Microsoft Store UI、winget、第三方下载站或镜像；下载 TLS 验证保持启用。
+• MSIX 清单身份和发布者固定为官方已核实的身份，版本动态发现。
+• 旧通用 MSIX 直链不再作为版本来源或失败回退。清单失败、格式或身份变化、目标包不可访问时明确报错，不误报已是最新版。
+• 下载响应头不能覆盖清单版本；响应头存在版本时必须相同，下载包内版本也必须相同。下载结束、部署之前重读清单，发布目标变化时停止本次部署并提示重新操作。
+• 清单 JSON 使用系统 DataContractJsonSerializer，有大小上限，不执行任何内容；只接受预期产品的 schemaVersion 1 和有效的四段 MSIX 版本，不接受清单提供的任意 URL。
+• Windows 签名预检使用本机缓存信任链，不主动联网获取吊销信息；Windows 部署服务还会执行自己的校验。
+• 首次安装使用 Add-AppxProvisionedPackage 和官方离线许可证；本机已安装时的更新使用 Add-AppxPackage。
+• 修复采用覆盖部署和重新注册。不会调用 Remove-AppxPackage、Reset-AppxPackage，也不删除用户应用数据。
+• 完整窗口的安装 / 更新入口只准备安装包；侧栏默认同样等待应用。侧栏勾选“准备完成后自动安装并重启”时，本次准备成功后才继续安装；取消、失败和进程重开均不继承自动安装选择。此选项不判断任务是否结束。
+• 完整包与续传身份保存在同一下载缓存中，关闭助手不会删除。新进程重新 Prepare 时读取实时版本及 ETag，复用仍有效的完整缓存，重新校验后等待手动安装；不持久化自动执行指令。
+• 侧栏和完整窗口共用 PackageCacheInfo：匹配的完整缓存显示“已下载，待校验”与“校验并准备”；旧官方缓存按正常未下载处理，仅显示灰色提示；助手的有效部分下载仍可续传。完整窗口首次显示自动执行只读检查。
+• 官方缓存来源仅为当前用户 Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\windows-updates\prepared.msix，不接入 prepared.download、Store 缓存或 staged-msix.json。路径不再存在或官方改变缓存规则时自然回到正常下载。
+• 官方缓存通过包身份、版本、架构、长度与 Windows 签名检查后，才原子发布到助手自己的路径；同卷优先硬链接，失败则尝试本地复制。导入失败不覆盖有效续传文件，取消清理本次临时引用。空间检查在硬链接尝试之后进行，避免要求额外一份完整包空间。
+• 只支持助手复用官方完整缓存，不承诺官方反向复用助手下载或两端正在进行的下载合并。不改写、删除官方文件和更新状态；助手清理只移除自己的引用。进入 InstallerWorkflow 后继续走原有许可证、签名、最新版本复核及部署流程。
+• InstallPrepared 重读官方清单并核对准备版本，重新检查本机版本、包内版本、签名、许可证和空间。官方版本已变化时清除界面的准备状态，要求重新准备，不自动安装旧包。
+• 没有自动更新后台服务或计划任务；不提供降级或强制绕过公司策略的选项。
+• 部署阶段不可取消，以免中止 Windows 事务；下载、版本检查和安装前复核阶段可取消。实际部署时暂时禁用打开应用按钮，避免再次启动造成占用。
+• 完成状态由 UiStatus.Finished 明确传递，不以 prepared 是否为空推断。成功后显示结果与打开 ChatGPT；失败保留有效准备包并显示重试按钮，空闲时隐藏取消。
+• 仅对 0x80073D02，或同时包含 0x800700E9 和本应用标识的错误做一次短暂等待重试。重试只存在于用户已确认的部署辅助进程中，不会触发下载准备后的自动安装。
+• 完整异常通过独立的进度记录类型送回日志文件，界面只展示摘要；再次操作清空界面旧记录，但不删除原有日志。最大化时内容居中并限制宽度。
+• 仅检查不申请 UAC、不下载完整安装包或许可证，不修改应用；仅写本工具运行日志。说明获取失败不会丢弃已取得的版本检查结果。
+• 发布说明从 https://learn.chatgpt.com/docs/changelog 读取，网络白名单只为此页面增加精确地址。HTML 仅转换成纯文本，不执行脚本。
+• Windows 包版本与日志版本的构建计数不同，累计范围按前两段发布批次比较。只使用明确带版本号的 codex-app 条目，排除标题明确限于 macOS 的公告；跨平台内容保留原文适用范围。无版本公告及同批次构建差异不推测归属。
+• 检查结论针对官方生产渠道当前公布的版本；应用内待安装和待重启状态需在完成更新后刷新。官方网页结构不再可识别时明确报告说明获取失败。
+• 侧栏采用官方全局 MCP App 入口，位置由客户端管理。页面直接检查、下载和应用更新，底部小灰字“打开所在文件夹”打开当前更新器副本的文件夹；需要完整窗口时可从该文件夹双击 EXE。不接管官方更新蓝点，不依赖项目配置。
+• 插件来源保存在 %LOCALAPPDATA%\ChatGPTInstallHelper\Sidebar，助手副本在 App\{version}。不放入 ChatGPT 安装目录、下载 Cache 或临时文件夹；应用更新和覆盖重装不会清理这些目录。
+• 用户主动添加 / 修复时才更新侧栏配置；安装 ChatGPT 不隐式重装插件，用户停用或移除入口不会在下次更新时被自动恢复。
+• 原生命令负责更新 Codex 用户配置与插件缓存，不手写或整体覆盖 config.toml。发现同名来源指向其他目录时停止；重复添加和移除可重试。添加失败保留已准备资源便于再次修复，只有确认安装成功才写完成记录。
+• 移除侧栏入口仅移除本插件和专用来源；保留独立助手、下载缓存与日志。不会强制重启 ChatGPT；客户端需要重新加载插件时由用户选择时机。
+• MCP 使用固定工具及按页面内容生成的资源 URI，严格拒绝额外工具参数和未知资源。只声明页面与工具能力，不监听网络端口或安装开机启动项；后台桥接进程由 Codex 管理。
+• 需要本机随附 Codex CLI 支持 plugin marketplace add / plugin add / plugin remove。找不到或不支持时明确提示，不下载额外运行时、不修改执行策略或公司策略。
+
+docs/使用说明.txt 包含系统要求、代理说明和已验证/未验证的范围。

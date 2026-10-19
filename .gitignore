@@ -1,0 +1,26 @@
+# 本地构建与发布产物
+bin/
+obj/
+dist/
+*.exe
+*.dll
+*.pdb
+*.zip
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+
+# 用户配置、缓存与日志
+.vs/
+*.user
+*.suo
+*.log
+Cache/
+Logs/
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
