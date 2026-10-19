@@ -31,7 +31,8 @@ namespace ChatGPTInstaller
                 Guid dispatch = new Guid("00020400-0000-0000-C000-000000000046");
                 folder = ((ShellView)view).GetItemObject(0, ref dispatch);
                 shell = folder.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, folder, null);
-                shell.GetType().InvokeMember("ShellExecute", BindingFlags.InvokeMethod, null, shell, new object[] { executable, "--background", Path.GetDirectoryName(executable), "open", 0 });
+                // 后台隐藏由 --background 控制；SW_HIDE 会覆盖以后第一次显式打开窗口。
+                shell.GetType().InvokeMember("ShellExecute", BindingFlags.InvokeMethod, null, shell, new object[] { executable, "--background", Path.GetDirectoryName(executable), "open", 1 });
             }
             finally
             {

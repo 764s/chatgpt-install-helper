@@ -62,7 +62,8 @@ namespace ChatGPTInstaller
                 if (!created)
                 {
                     if (args.Length == 1 && args[0] == "--background") return 0;
-                    bool opened = WindowActivation.NotifyExisting() || LocalUpdateClient.TryOpenExisting();
+                    bool opened = LocalUpdateClient.TryOpenExisting();
+                    if (!opened) MessageBox.Show("检测到正在运行的更新器，但未能显示其窗口。请在当前操作结束后退出旧助手，再打开当前版本。", AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     // 已有窗口先立即唤起；入口配置由这个独立进程完成，不阻塞已有下载或部署。
                     if (startup != null)
                     {
@@ -81,7 +82,6 @@ namespace ChatGPTInstaller
                             Application.Run(context);
                         }
                     }
-                    if (!opened) MessageBox.Show("安装助手正在运行或正在启动。请稍后再打开窗口。", AppInfo.ProductName);
                     return 0;
                 }
                 try

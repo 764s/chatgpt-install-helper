@@ -35,7 +35,10 @@ namespace ChatGPTInstaller
             {
                 string arguments = "--startup " + current.Id + " " + current.StartTime.ToUniversalTime().Ticks;
                 using (var launched = Process.Start(new ProcessStartInfo(target, arguments) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(target) }))
+                {
                     if (launched == null) throw new IOException("无法启动安装助手的独立副本，请保留下载的 EXE 后重试。");
+                    WindowActivation.AllowForeground(launched.Id);
+                }
             }
             return true;
         }

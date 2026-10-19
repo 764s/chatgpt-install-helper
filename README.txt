@@ -1,9 +1,9 @@
-ChatGPT 安装助手 1.6.2 源码
+ChatGPT 安装助手 1.6.3 源码
 
 这是 Windows Forms / C# 5 单文件 EXE 项目，使用 Windows 自带 .NET Framework 4.x 和 Windows PowerShell 5.1 组件，无 NuGet 依赖。
 
 编译：在 PowerShell 中运行本目录的 build.ps1。
-默认在上一级目录生成 ChatGPTInstaller-1.6.2.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
+默认在上一级目录生成 ChatGPTInstaller-1.6.3.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
 编译脚本使用系统内置 csc.exe；不需要 Visual Studio 或 .NET SDK。
 
 主要代码
@@ -24,6 +24,7 @@ InstallerStartup / StartupNotice：原 EXE 保存并启动固定副本后退出�
 SidebarIntegration / CodexPluginClient：保存按版本隔离的助手副本，生成本地插件来源，调用随附 codex plugin marketplace add / plugin add / plugin remove 命令完成配置。自动流程只查询安装存在性，不重装已有旧版或启用被停用的插件。副本保存时记录启动目标，与插件安装状态分离；插件完成记录只在官方命令确认及缓存中的 MCP 目标核对通过后写入。
 SidebarMcpServer / Sidebar/launcher.html：EXE 的 --mcp 模式提供标准 stdio MCP 服务与内嵌页面。页面直接展示状态并调用固定操作；写操作仅面向页面，不接受路径、命令或下载地址。
 SidebarUiResource：将程序集版本写入页面，再对完整 HTML 计算 SHA-256，作为工具声明与资源读取共用的 URI。内容变化会自动改变缓存标识；页面标题旁显示助手版本，避免宿主继续使用旧模板时无法分辨。
+WindowActivation：按管道服务器 PID 定位现有主窗口，显式恢复原生显示状态并核对可见性；新窗口也显式显示，避免 SW_HIDE 与托管 Visible 状态不同步。
 LocalUpdateClient / LocalUpdateServer：同用户命名管道连接唯一的助手进程，所有操作回到 MainForm 的同一套状态与 InstallerWorkflow，窗口和页面不会各自下载或同时部署。
 ExplorerLauncher：取得桌面 Explorer 的 Shell 自动化对象并由它创建助手，避免助手成为 MCP 子进程而随宿主关闭。
 UpdaterApplicationContext：允许助手隐藏运行；客户端通过桌面 Shell 启动独立进程，应用更新退出 ChatGPT 后仍由它核对结果和请求重新打开。关闭侧栏或隐藏完整窗口不取消已开始的工作；隐藏且空闲、页面停止访问两分钟后退出，缓存保留。

@@ -4,8 +4,10 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Security.Principal;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Microsoft.Win32.SafeHandles;
 
 namespace ChatGPTInstaller
 {
@@ -44,17 +46,28 @@ namespace ChatGPTInstaller
 
         public static bool TryOpenExisting()
         {
-            try { Send("open", false, 500, 1000); return true; }
+            try
+            {
+                int serverProcessId = 0;
+                Send("open", false, 1000, 1500, processId => { serverProcessId = processId; WindowActivation.AllowForeground(processId); });
+                return serverProcessId != 0 && WindowActivation.ShowExisting(serverProcessId);
+            }
             catch (TimeoutException) { return false; }
             catch (IOException) { return false; }
             catch (InvalidOperationException) { return false; }
         }
 
-        private static object Send(string command, bool autoInstall, int timeout, int responseTimeout = 15000)
+        private static object Send(string command, bool autoInstall, int timeout, int responseTimeout = 15000, Action<int> connected = null)
         {
             using (var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
             {
                 pipe.Connect(timeout);
+                if (connected != null)
+                {
+                    uint processId;
+                    if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out processId)) throw new IOException("无法确认正在运行的更新器进程。");
+                    connected(checked((int)processId));
+                }
                 var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, true) { AutoFlush = true };
                 var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, true);
                 writer.WriteLine(JsonData.Serialize(new { command = command, autoInstall = autoInstall }));
@@ -75,5 +88,8 @@ namespace ChatGPTInstaller
             // 由 Explorer 创建进程，而非作为 MCP 子进程；安装关闭宿主时仍能核对结果并重启。
             ExplorerLauncher.Start(executable);
         }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint processId);
     }
 }

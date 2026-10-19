@@ -19,7 +19,7 @@ namespace ChatGPTInstaller
             idleTimer = new Timer { Interval = 15000 };
             idleTimer.Tick += delegate { if (form.CanExitBackground()) form.ExitBackground(); };
             idleTimer.Start();
-            if (!background) form.Show();
+            if (!background) WindowActivation.Show(form);
         }
 
         protected override void Dispose(bool disposing)
