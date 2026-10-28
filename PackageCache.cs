@@ -51,7 +51,7 @@ namespace ChatGPTInstaller
                 {
                     var info = PackageInfo.Read(Paths.OfficialPackage, release.Architecture);
                     if (info.Version != release.Version)
-                        result.Notice = "官方已下载 " + info.Version + "，" + (info.Version < release.Version ? "不是最新版，将下载新版。" : "与当前发布版本不同，暂不使用。");
+                        result.Notice = "官方已下载 " + info.Version + "，与本次可安装目标 " + release.Version + " 不同，暂不使用。";
                     else if (new FileInfo(Paths.OfficialPackage).Length != release.Size)
                         result.Notice = "官方缓存不完整，将继续下载。";
                     else
@@ -89,7 +89,7 @@ namespace ChatGPTInstaller
             string temporary = null;
             try
             {
-                progress.Report(new UiStatus("检查官方缓存", "核对官方已下载的完整包是否匹配最新版…", -1));
+                progress.Report(new UiStatus("检查官方缓存", "核对官方已下载的完整包是否匹配本次安装目标…", -1));
                 // 允许官方移除或换名自己的路径，但复制期间不允许改写源文件内容。
                 using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
                 {

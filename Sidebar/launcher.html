@@ -12,11 +12,10 @@
   body{margin:0;background:var(--color-background-primary,var(--bg));color:var(--color-text-primary,var(--text));padding:clamp(20px,5vw,54px)}
   main{max-width:600px;margin:0 auto}header{display:flex;align-items:center;gap:11px;margin-bottom:24px}
   .brand{display:grid;place-items:center;width:36px;height:36px;border:1px solid var(--line);border-radius:11px;color:var(--text);background:var(--soft)}
-  h1{font-size:19px;font-weight:650;letter-spacing:-.4px;margin:0;flex:1}.build{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}svg{display:block}
+  h1{font-size:19px;font-weight:650;letter-spacing:-.4px;margin:0;flex:1}svg{display:block}
   button{font:inherit;cursor:pointer;border:0;transition:background .15s,opacity .15s}button:disabled{opacity:.48;cursor:default}button:focus-visible,input:focus-visible{outline:3px solid #70b59a;outline-offset:4px}
   .refresh{display:grid;place-items:center;background:transparent;color:var(--muted);height:34px;width:34px;border-radius:9px}.refresh:hover:enabled{background:var(--soft);color:var(--text)}
   .card{border:1px solid var(--line);border-radius:19px;background:var(--color-background-secondary,var(--card));padding:28px}
-  .eyebrow{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px;margin-bottom:12px}.dot{width:6px;height:6px;border-radius:50%;background:#57a68a}
   h2{font-size:25px;line-height:1.4;letter-spacing:-.7px;margin:0 0 22px;font-weight:650}
   .versions{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);align-items:center;padding:18px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
   .version-label{color:var(--muted);font-size:12px;margin-bottom:7px}.version{font-size:15px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;line-height:1.5}.arrow{color:var(--muted);text-align:center}.target{padding-left:14px}
@@ -24,6 +23,10 @@
   .track{height:5px;background:var(--soft);border-radius:6px;overflow:hidden}.fill{height:100%;width:0;background:#45ad87;border-radius:6px;transition:width .35s ease}.track.indeterminate .fill{width:35%!important;animation:slide 1.5s ease-in-out infinite}@keyframes slide{0%{transform:translateX(-110%)}100%{transform:translateX(390%)}}@media(prefers-reduced-motion:reduce){.track.indeterminate .fill{animation:none;width:100%!important;opacity:.55}}
   .detail{font-size:12px;line-height:1.7;color:var(--muted);margin:10px 0 0;overflow-wrap:anywhere}.error{font-size:13px;line-height:1.7;color:var(--error);margin:16px 0 0;overflow-wrap:anywhere}
   .cache-note{font-size:11px;line-height:1.65;color:var(--muted);margin:6px 0 0;overflow-wrap:anywhere}
+  .more{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+  .more summary{width:fit-content;cursor:pointer;line-height:1.6}.more summary:focus-visible{outline:3px solid #70b59a;outline-offset:4px;border-radius:3px}
+  .more[open] summary{margin-bottom:12px}.more dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 18px;margin:0 0 12px}.more dt,.more dd{margin:0}.more dd{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+  .more .detail,.more .cache-note,.more .error{font-size:12px;line-height:1.7;margin:10px 0 0}.more .error{color:var(--muted)}
   .actions{margin-top:24px}.primary{width:100%;min-height:44px;border-radius:10px;padding:11px 18px;font-size:13px;font-weight:600;color:white;background:var(--accent)}.primary:hover:enabled{background:var(--accent-hover)}
   .option{display:flex;align-items:center;gap:9px;font-size:12px;line-height:1.6;color:var(--muted);margin-top:20px;cursor:pointer}.option input{margin:0;width:15px;height:15px;accent-color:var(--accent);flex-shrink:0}.auto-note{font-size:11px;line-height:1.65;margin:7px 0 0 24px;color:var(--error)}
   .cancel{font-size:12px;background:transparent;color:var(--muted);padding:0;text-decoration:underline;text-underline-offset:3px;margin-left:auto}.progress-title{display:flex;align-items:center;gap:12px}
@@ -33,29 +36,38 @@
 </style>
 <main>
   <header><span class="brand"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 17v4h14v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><h1>ChatGPT 更新器</h1>
-    <span class="build" aria-label="更新器版本 __HELPER_VERSION__">v__HELPER_VERSION__</span><button id="refresh" class="refresh" title="重新检查更新" aria-label="重新检查更新" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.7-1L20 9M4 15l2.2 3A7 7 0 0 0 18 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button id="refresh" class="refresh" title="重新检查更新" aria-label="重新检查更新" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.7-1L20 9M4 15l2.2 3A7 7 0 0 0 18 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </header>
   <section class="card" aria-label="更新状态">
-    <div class="eyebrow"><span class="dot"></span><span id="badge">正在连接</span></div>
-    <h2 id="heading" aria-live="polite">读取更新状态…</h2>
-    <div class="versions"><div><div class="version-label">当前版本</div><div id="current" class="version">—</div></div><span class="arrow" aria-hidden="true">→</span><div class="target"><div class="version-label">官方最新版</div><div id="latest" class="version">—</div></div></div>
-    <p id="cacheSummary" class="detail" hidden></p>
-    <p id="cacheNotice" class="cache-note" hidden></p>
+    <h2 id="heading" aria-live="polite">连接更新器…</h2>
+    <div class="versions"><div><div class="version-label">当前版本</div><div id="current" class="version">—</div></div><span class="arrow" aria-hidden="true">→</span><div class="target"><div class="version-label">可安装版本</div><div id="target" class="version">—</div></div></div>
     <div id="progressBlock" class="progress-block" hidden>
       <div class="progress-info"><span id="phase" class="progress-title">准备中</span><button id="cancel" class="cancel" hidden>取消</button><span id="percent" class="percent"></span></div>
       <div id="track" class="track" role="progressbar" aria-label="更新进度" aria-valuemin="0" aria-valuemax="100"><div id="fill" class="fill"></div></div>
-      <p id="detail" class="detail"></p>
+      <p id="transfer" class="detail" hidden></p>
     </div>
-    <p id="error" class="error" role="alert" hidden></p>
-    <div class="actions"><button id="primary" class="primary" disabled>正在连接…</button></div>
-    <label id="option" class="option"><input id="auto" type="checkbox" disabled><span>准备完成后自动安装并重启</span></label>
-    <p id="autoNote" class="auto-note" hidden>请先结束正在进行的任务；勾选后不会等待任务结束。</p>
+    <p id="attention" class="error" role="alert" hidden></p>
+    <p id="readyNote" class="detail" hidden>请先结束任务；应用更新后将重启 ChatGPT。</p>
+    <div id="actions" class="actions"><button id="primary" class="primary" disabled>正在连接…</button></div>
+    <label id="option" class="option"><input id="auto" type="checkbox" disabled><span>下载后自动安装并重启</span></label>
+    <p id="autoNote" class="auto-note" hidden>将关闭 ChatGPT，请先结束任务。</p>
+    <details id="more" class="more">
+      <summary id="moreLabel">详情</summary>
+      <dl><dt id="latestLabel">已公布版本</dt><dd id="latest">—</dd><dt>下载状态</dt><dd id="cacheSummary">—</dd><dt>更新器</dt><dd>v__HELPER_VERSION__</dd><dt id="backendLabel" hidden>运行中的后台</dt><dd id="backend" hidden></dd></dl>
+      <p id="availabilityNotice" class="detail" hidden></p>
+      <p id="candidateNotice" class="cache-note" hidden></p>
+      <p id="cacheNotice" class="cache-note" hidden></p>
+      <p id="detail" class="detail" hidden></p>
+      <p id="error" class="error" hidden></p>
+      <p id="officialDiagnostic" class="detail" hidden></p>
+      <p id="guardAvailability" class="cache-note" hidden>当前后台尚未提供失败核对保护。请关闭旧更新器窗口及侧栏页面，待其空闲退出后重新打开新版。</p>
+    </details>
   </section>
-  <footer><div id="footer">默认下载后等待确认 · 安装成功后自动重启</div><button id="openFolder" class="folder-link" type="button" title="打开更新器程序所在文件夹" disabled>打开所在文件夹</button></footer>
+  <footer><button id="openFolder" class="folder-link" type="button" title="打开更新器程序所在文件夹" disabled>打开所在文件夹</button></footer>
 </main>
 <script>
 (() => {
-  const ids = ['refresh','badge','heading','current','latest','cacheSummary','cacheNotice','progressBlock','phase','cancel','percent','track','fill','detail','error','primary','openFolder','option','auto','autoNote','footer'];
+  const ids = ['refresh','heading','current','target','latest','latestLabel','backendLabel','backend','availabilityNotice','candidateNotice','cacheSummary','cacheNotice','progressBlock','phase','cancel','percent','track','fill','transfer','detail','attention','readyNote','error','officialDiagnostic','guardAvailability','actions','primary','openFolder','option','auto','autoNote','more','moreLabel'];
   const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
   const pending = new Map();
   let nextId = 1, sequence = 0, appliedSequence = 0, timer;
@@ -92,46 +104,66 @@
     if (result?.isError) throw new Error(result.content?.find(item => item.type === 'text')?.text || '操作未完成。');
     const value = result?.structuredContent;
     if (!value || typeof value.state !== 'string') throw new Error('插件仍在使用旧版连接。请等任务结束后重新打开 ChatGPT。');
+    if (typeof value.canDownload !== 'boolean') throw new Error('更新器后台仍是旧版。请关闭旧更新器窗口和侧栏页面，等待约两分钟后重新打开新版更新器。');
     if (ticket >= appliedSequence) {
       if (state?.sessionId && state.sessionId !== value.sessionId) el.auto.checked = false;
       appliedSequence = ticket; state = value; connectionError = '';
       if (state.busy) el.auto.checked = state.autoInstall === true;
-      if (state.ready || state.state === 'current' || state.state === 'error') el.auto.checked = false;
+      if (state.ready || state.state === 'current' || state.state === 'unavailable' || state.state === 'error') el.auto.checked = false;
       render();
     }
     return value;
   }
   function render() {
     const s = state, busy = !!s?.busy, cached = s?.cacheState === 'complete', partial = s?.cacheState === 'partial';
-    const titles = {idle:'检查是否有更新',checking:'正在检查更新',available:'发现新版本',downloading:'正在准备更新',ready:'已下载，随时更新',installing:'正在应用更新',current:'已是最新版本',error:'更新尚未完成'};
-    const badges = {idle:'准备就绪',checking:'检查中',available:cached ? '可复用' : partial ? '下载未完成' : '未下载',downloading:'准备与校验',ready:'等待应用',installing:'安装中',current:'已更新',error:'需要重试'};
-    if (cached) titles.available = '已下载，待校验';
-    el.heading.textContent = s ? titles[s.state] || '更新状态' : connected ? '正在启动更新器…' : '读取更新状态…';
-    el.badge.textContent = s ? badges[s.state] || '更新状态' : '正在连接';
-    el.current.textContent = s?.currentVersion || '—'; el.latest.textContent = s?.latestVersion || '—';
-    el.cacheSummary.textContent = s?.cacheSummary || '';
-    el.cacheSummary.hidden = !s?.cacheSummary || busy || s.ready || s.upToDate;
+    const resumable = partial && s?.canDownload && !s.upToDate;
+    const titles = {idle:'检查更新',checking:'检查更新…',diagnosing:'核对官方更新…',available:cached ? '安装包已下载' : '有可用更新',downloading:'准备更新…',ready:'更新已就绪',installing:'应用更新…',current:'暂无可用更新',unavailable:'暂无安装包',error:'更新未完成'};
+    el.heading.textContent = s ? titles[s.state] || '更新状态' : connectionError ? '连接未完成' : '连接更新器…';
+    el.current.textContent = s?.currentVersion || '—';
+    // 主视图只显示实际目标；其他渠道公布的版本放在详情中。
+    el.target.textContent = s?.preparedVersion || s?.availableVersion || (s?.ready ? '待复核' : busy ? '查询中…' : s?.checkedVersion ? '暂无' : '—');
+    el.latest.textContent = s?.latestVersion || '—';
+    el.latestLabel.textContent = s?.latestVersionLabel || '已公布版本';
+    el.backend.textContent = s?.helperVersion ? 'v' + s.helperVersion : '';
+    el.backend.hidden = el.backendLabel.hidden = !s?.helperVersion || s.helperVersion === '__HELPER_VERSION__';
+    el.availabilityNotice.textContent = s?.availabilityNotice || '';
+    el.availabilityNotice.hidden = !s?.availabilityNotice;
+    el.candidateNotice.textContent = s?.candidateNotice || '';
+    el.candidateNotice.hidden = !s?.candidateNotice;
+    el.cacheSummary.textContent = s?.ready ? '已校验，等待应用' : s?.cacheSummary || '—';
     el.cacheNotice.textContent = s?.cacheNotice || '';
-    el.cacheNotice.hidden = !s?.cacheNotice || s.upToDate || s.ready;
-    el.progressBlock.hidden = !s || (!busy && !s.ready);
-    el.phase.textContent = s?.ready ? '下载与校验已完成' : s?.phase || '准备中';
-    el.detail.textContent = s?.ready ? '应用更新会关闭 ChatGPT，请先结束任务。' : s?.detail || '';
-    const percentage = s?.ready ? 100 : s?.percent;
+    el.cacheNotice.hidden = !s?.cacheNotice;
+    el.progressBlock.hidden = !s || s.ready || (!busy && !resumable);
+    el.phase.textContent = busy ? s?.phase || '处理中' : '已下载';
+    el.detail.textContent = s?.detail || '';
+    el.detail.hidden = !s?.detail || s.detail === s.error;
+    const transfer = s?.state === 'downloading' && /(?:KB|MB|GB)\b/i.test(s.detail || '') ? s.detail : !busy && resumable ? s.cacheSummary : '';
+    el.transfer.textContent = transfer;
+    el.transfer.hidden = !transfer;
+    const percentage = s?.percent;
     el.track.classList.toggle('indeterminate', busy && (percentage == null || percentage < 0));
-    el.fill.style.width = s?.ready ? '100%' : Math.max(0,Math.min(100,percentage || 0)) + '%';
+    el.fill.style.width = Math.max(0,Math.min(100,percentage || 0)) + '%';
     el.percent.textContent = percentage >= 0 ? percentage + '%' : '';
     if (percentage >= 0) el.track.setAttribute('aria-valuenow', percentage); else el.track.removeAttribute('aria-valuenow');
     el.cancel.hidden = !s?.canCancel; el.cancel.disabled = commandPending;
-    const problem = connectionError || s?.error || '';
+    const problem = String(connectionError || s?.error || '');
     el.error.hidden = !problem; el.error.textContent = problem;
-    el.primary.textContent = !connected ? '重新连接' : !s ? '正在连接…' : busy ? s.state === 'installing' ? '正在应用…' : s.state === 'downloading' ? '正在准备…' : '正在检查…' : s.ready ? s.error ? '重试应用并重启' : '应用更新并重启' : s.upToDate ? '重新检查更新' : s.checkedVersion ? cached ? '校验并准备' : partial ? '继续下载' : s.error ? '重试下载' : '下载更新' : '检查更新';
+    const shortProblem = problem.split(/[。！？\r\n]/)[0];
+    const attention = s?.diagnosticSuggestRepair ? '更新器可能需要修复。' : shortProblem.length > 54 ? shortProblem.slice(0, 54) + '…' : shortProblem;
+    el.attention.hidden = !attention; el.attention.textContent = attention;
+    el.readyNote.hidden = !s?.ready;
+    el.moreLabel.textContent = problem || s?.diagnosticSuggestRepair ? '查看详情' : '详情';
+    el.officialDiagnostic.hidden = !s?.diagnosticMessage;
+    el.officialDiagnostic.textContent = s?.diagnosticMessage || '';
+    el.guardAvailability.hidden = !s || s.officialCheckSupported === true;
+    el.actions.hidden = busy;
+    el.primary.textContent = !connected ? '重新连接' : !s ? '正在连接…' : s.ready ? s.error ? '重试应用并重启' : '应用更新并重启' : s.upToDate || s.state === 'unavailable' ? '重新检查' : s.canDownload ? cached ? '校验并准备' : partial ? '继续下载' : s.error ? '重试下载' : '下载更新' : '检查更新';
     el.primary.disabled = commandPending || (connected && (!s || busy));
     el.refresh.disabled = !connected || commandPending || busy;
     el.openFolder.disabled = !connected || commandPending;
-    el.option.hidden = !!s && (s.ready || s.upToDate || s.state === 'installing');
+    el.option.hidden = !!s && (s.ready || s.upToDate || (!s.canDownload && s.state !== 'downloading'));
     el.auto.disabled = !connected || commandPending || (busy && s.state !== 'downloading');
     el.autoNote.hidden = el.option.hidden || !el.auto.checked;
-    el.footer.textContent = s?.state === 'installing' ? '安装在独立进程中继续 · 成功后自动打开 ChatGPT' : '默认下载后等待确认 · 安装成功后自动重启';
   }
   function schedule() { clearTimeout(timer); timer = setTimeout(poll, state?.busy ? 1000 : 5000); }
   async function poll() {
@@ -162,7 +194,7 @@
   el.primary.addEventListener('click', () => {
     if (!connected) { connect(); return; }
     if (state?.ready) perform('apply_update');
-    else if (!state?.checkedVersion || state.upToDate) perform('check_updates');
+    else if (!state?.canDownload || state.upToDate) perform('check_updates');
     else perform('download_update', {autoInstall:el.auto.checked});
   });
   el.refresh.addEventListener('click', () => perform('check_updates'));

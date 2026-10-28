@@ -6,7 +6,9 @@ namespace ChatGPTInstaller
     internal sealed class UpdateCheckResult
     {
         public Version InstalledVersion;
-        public Version LatestVersion;
+        public ReleaseSelection Selection;
+        public Version LatestVersion { get { return Selection == null ? null : Selection.LatestVersion; } }
+        public Version AvailableVersion { get { return Selection == null ? null : Selection.AvailableVersion; } }
         public string LocalError;
         public string NotesError;
         public bool NotesFetched;
@@ -27,10 +29,7 @@ namespace ChatGPTInstaller
             {
                 if (!string.IsNullOrEmpty(LocalError)) return "本机版本读取失败，无法判断是否有更新";
                 if (LatestVersion == null) return "官方版本号不可用，暂时无法判断";
-                if (InstalledVersion == null) return "尚未安装新版，可安装官方最新版";
-                if (UpdateAvailable == true) return "有更新：" + InstalledVersion + " → " + LatestVersion;
-                if (InstalledVersion > LatestVersion) return "本机版本高于官方生产渠道，无需降级";
-                return "已是官方生产渠道最新版";
+                return Selection.Summary(InstalledVersion);
             }
         }
     }

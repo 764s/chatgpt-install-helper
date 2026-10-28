@@ -13,16 +13,27 @@ namespace ChatGPTInstaller
             text.AppendLine(result.Summary);
             text.AppendLine("检查时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             text.AppendLine("本机安装包：" + (result.InstalledVersion == null ? "未检测到" : result.InstalledVersion.ToString()));
-            text.AppendLine("官方最新版：" + (result.LatestVersion == null ? "未能确认" : result.LatestVersion.ToString()));
+            text.AppendLine((result.Selection == null ? "官方最新版" : result.Selection.VersionLabel) + "：" + (result.LatestVersion == null ? "未能确认" : result.LatestVersion.ToString()));
+            text.AppendLine("本次可安装版本：" + (result.AvailableVersion == null ? "未选择安装包" : result.AvailableVersion.ToString()));
+            if (result.Selection != null && !string.IsNullOrEmpty(result.Selection.Notice))
+            {
+                text.AppendLine(result.Selection.Notice);
+                if (!string.IsNullOrEmpty(result.Selection.CandidateNotice)) text.AppendLine(result.Selection.CandidateNotice);
+            }
             text.AppendLine("仅查询版本及发布说明；未下载完整安装包、申请管理员权限或改动应用。");
             text.AppendLine();
             if (!string.IsNullOrEmpty(result.LocalError)) text.AppendLine("本机检测信息：" + result.LocalError);
-            text.AppendLine("版本来源：App 使用的官方生产渠道更新清单，每次检查实时读取，不固定版本号。");
+            text.AppendLine("版本来源：官方离线发布清单与 Store 发布标记独立读取；仅在已读取的来源范围内比较最新版。");
+            text.AppendLine(AppInfo.ReleaseFeed);
             text.AppendLine(AppInfo.UpdateManifest);
-            text.AppendLine("已核对该版本安装包可访问。应用内的待安装或重启状态仍需由应用完成更新后刷新。");
+            text.AppendLine("官方客户端可以通过 Microsoft Store 下载更新；Store 蓝点及其系统缓存不等于公开的独立 MSIX 包。");
+            text.AppendLine(result.AvailableVersion == null ? "本次没有可下载的安装目标。" : "已核对本次所选版本的安装包可访问。应用内的待安装或重启状态仍需由应用完成更新后刷新。");
             text.AppendLine();
             text.AppendLine("累计更新内容");
             text.AppendLine("────────────────────────────");
+            Version notesTarget = result.AvailableVersion ?? result.LatestVersion;
+            if (result.Selection != null && result.Selection.LatestPackageMissing)
+                text.AppendLine(result.AvailableVersion == null ? "以下为官方已发布内容，不代表目前可以安装。" : "累计范围以本次可安装版本为上限，不包含缺包的更高版本。");
             if (!result.NotesFetched)
             {
                 text.AppendLine("版本检查已完成，但更新内容获取失败。不能据此判断没有变更。");
@@ -35,16 +46,16 @@ namespace ChatGPTInstaller
             else if (result.InstalledVersion == null)
             {
                 text.AppendLine("没有本机版本作为基线。以下列出最近 3 条带版本号的桌面版说明，供安装前参考。");
-                AppendNotes(text, result.Notes.Where(n => n.Versions.Any(v => ChangelogParser.Batch(v) <= ChangelogParser.Batch(result.LatestVersion))).Take(3).ToList());
+                AppendNotes(text, result.Notes.Where(n => n.Versions.Any(v => ChangelogParser.Batch(v) <= ChangelogParser.Batch(notesTarget))).Take(3).ToList());
             }
-            else if (result.UpdateAvailable != true)
+            else if (result.InstalledVersion >= notesTarget)
             {
-                text.AppendLine("此安装渠道没有高于本机的版本，因此没有待安装的累计更新范围。");
+                text.AppendLine("本次比较范围没有高于本机的版本，因此没有待安装的累计更新范围。");
             }
             else
             {
-                var selected = ChangelogParser.Between(result.Notes, result.InstalledVersion, result.LatestVersion);
-                text.AppendLine("范围：" + result.InstalledVersion + " 之后，至 " + result.LatestVersion + "（含）。");
+                var selected = ChangelogParser.Between(result.Notes, result.InstalledVersion, notesTarget);
+                text.AppendLine("范围：" + result.InstalledVersion + " 之后，至 " + notesTarget + "（含）。");
                 text.AppendLine("按官方明确标注的发布批次累计；Windows 构建号不一定与日志逐一对应。跨平台条目的适用性以原文为准。");
                 text.AppendLine("未标版本的公告、未公开的修复以及同一批次内的小构建差异，不作推断。");
                 if (selected.Count == 0)
@@ -52,7 +63,7 @@ namespace ChatGPTInstaller
                 else
                 {
                     text.AppendLine("已找到 " + selected.Count + " 条官方说明：");
-                    if (!selected.Any(n => n.Versions.Any(v => ChangelogParser.Batch(v) == ChangelogParser.Batch(result.LatestVersion))))
+                    if (!selected.Any(n => n.Versions.Any(v => ChangelogParser.Batch(v) == ChangelogParser.Batch(notesTarget))))
                         text.AppendLine("覆盖提示：日志尚未覆盖目标发布批次，以下内容不能视为完整构建差异。");
                     AppendNotes(text, selected);
                 }

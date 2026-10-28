@@ -41,13 +41,12 @@ namespace ChatGPTInstaller
             {
                 CurrentVersion = result.LocalError != null ? "读取失败" : result.InstalledVersion == null ? "尚未安装新版" : result.InstalledVersion.ToString()
             });
-            var resolver = new ReleaseResolver(log);
-            var release = resolver.Resolve(PlatformInfo.Architecture(), proxy, token);
-            result.LatestVersion = release.Version;
-            result.Cache = PackageCache.Inspect(release, token);
+            var resolver = new ReleaseResolver(log, progress);
+            result.Selection = resolver.Resolve(PlatformInfo.Architecture(), proxy, result.InstalledVersion, token);
+            if (result.Selection.Package != null) result.Cache = PackageCache.Inspect(result.Selection.Package, token);
             progress.Report(new UiStatus("读取累计更新内容", result.Summary, -1)
             {
-                LatestVersion = result.LatestVersion == null ? "无法确认" : result.LatestVersion.ToString(), Cache = result.Cache
+                Selection = result.Selection, Cache = result.Cache
             });
             try
             {

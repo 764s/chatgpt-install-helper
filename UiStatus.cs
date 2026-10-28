@@ -7,6 +7,8 @@ namespace ChatGPTInstaller
         public int Percent;
         public string CurrentVersion;
         public string LatestVersion;
+        public string LatestVersionLabel;
+        public ReleaseSelection Selection;
         public PackageCacheInfo Cache;
         public bool Deployment;
         public bool Finished;

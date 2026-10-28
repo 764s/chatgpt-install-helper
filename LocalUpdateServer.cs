@@ -53,11 +53,14 @@ namespace ChatGPTInstaller
                             var request = JsonData.Parse(line);
                             string command = JsonData.Get(request, "command") as string;
                             object choice = JsonData.Get(request, "autoInstall");
-                            if (request == null || request.Count != 2 || !(choice is bool)) throw new InvalidDataException("无效的更新器请求。");
+                            bool hasContext = request != null && request.ContainsKey("officialContext");
+                            var officialContext = hasContext ? OfficialUpdateContext.Parse(JsonData.Get(request, "officialContext")) : null;
+                            if (request == null || request.Count != (hasContext ? 3 : 2) || !(choice is bool) || (hasContext && officialContext == null))
+                                throw new InvalidDataException("无效的更新器请求。");
                             var completion = new TaskCompletionSource<object>();
                             form.BeginInvoke(new Action(() =>
                             {
-                                try { completion.SetResult(form.HandleSidebarCommand(command, (bool)choice)); }
+                                try { completion.SetResult(form.HandleSidebarCommand(command, (bool)choice, officialContext)); }
                                 catch (Exception ex) { completion.SetException(ex); }
                             }));
                             if (!completion.Task.Wait(10000)) throw new IOException("更新器界面暂时没有响应。");

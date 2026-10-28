@@ -110,7 +110,8 @@ namespace ChatGPTInstaller
                     SidebarIntegration.OpenFolder();
                     command = "status";
                 }
-                object state = LocalUpdateClient.Request(command, hasChoice && (bool)JsonData.Get(values, "autoInstall"));
+                var officialContext = OfficialUpdateContext.Capture(JsonData.Get(parameters, "_meta") as Dictionary<string, object>);
+                object state = LocalUpdateClient.Request(command, hasChoice && (bool)JsonData.Get(values, "autoInstall"), officialContext);
                 return Result(id, new
                 {
                     content = new[] { new { type = "text", text = "更新器状态已刷新。下载完成后默认等待应用；仅勾选自动安装时自动继续。" } },

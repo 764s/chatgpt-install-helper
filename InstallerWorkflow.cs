@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Net;
 using System.Threading;
+using System.Xml;
 
 namespace ChatGPTInstaller
 {
@@ -33,28 +35,36 @@ namespace ChatGPTInstaller
                 CurrentVersion = installed == null ? "尚未安装新版" : installed.Version.ToString(),
                 LatestVersion = "查询中…"
             });
-            var resolver = new ReleaseResolver(log);
-            var release = resolver.Resolve(PlatformInfo.Architecture(), proxy, token);
-            progress.Report(new UiStatus("官方版本已确认", "准备下载…", -1)
+            var resolver = new ReleaseResolver(log, progress);
+            Version installedVersion = installed == null ? null : installed.Version;
+            var selection = resolver.Resolve(PlatformInfo.Architecture(), proxy, installedVersion, token);
+            var release = selection.Package;
+            if (ShouldSkip(installed, selection.LatestVersion, updateOnly) || (release != null && ShouldSkip(installed, release.Version, updateOnly)))
             {
-                LatestVersion = release.Version.ToString()
-            });
-            if (ShouldSkip(installed, release.Version, updateOnly))
-            {
-                Complete(installed.Version, installed.Version == release.Version ? "已是官方生产渠道最新版，无需更新。" : "本机版本高于官方生产渠道，已保留当前版本。");
+                Complete(installed.Version, selection.Summary(installed.Version) + "。");
                 return null;
             }
-            if (installed == null && updateOnly) log.Write("尚未安装新版 ChatGPT，将先准备官方最新版安装包。");
+            if (release == null)
+            {
+                progress.Report(new UiStatus("暂无可用安装包", "暂未找到可用于" + (updateOnly ? "更新" : "安装 / 重装") + "的官方包。", 100));
+                return null;
+            }
+            if (installed == null && updateOnly) log.Write("尚未安装新版 ChatGPT，将先准备已选定的官方安装包。");
             string package = resolver.Client.Download(release, token, progress);
             token.ThrowIfCancellationRequested();
             var info = VerifyPackage(release, package, token);
-            progress.Report(new UiStatus("安装包验证通过", "正在获取官方离线许可证…", -1) { LatestVersion = info.Version.ToString() });
+            progress.Report(new UiStatus("安装包验证通过", "正在获取官方离线许可证…", -1));
             string license = Path.Combine(Paths.Cache, "ChatGPT-License.xml");
-            File.WriteAllBytes(license, resolver.Client.GetSmall(release.LicenseUrl, 1024 * 1024, token));
-            PackageInfo.CheckLicense(license);
+            byte[] licenseData;
+            try { licenseData = resolver.Client.GetSmall(release.LicenseUrl, 1024 * 1024, token); }
+            catch (WebException ex) { throw new UpdateRetrievalException(UpdateRetrievalStage.Information, "获取官方离线许可证失败：" + ex.Message, ex); }
+            catch (IOException ex) { throw new UpdateRetrievalException(UpdateRetrievalStage.Information, "读取官方离线许可证失败：" + ex.Message, ex); }
+            File.WriteAllBytes(license, licenseData);
+            CheckRetrievedLicense(license);
             Paths.RequireSpace(Environment.GetFolderPath(Environment.SpecialFolder.Windows), info.ExpandedSize + 512L * 1024 * 1024, "系统盘");
-            progress.Report(new UiStatus("复核官方最新版", "确认下载期间没有新的官方发布…", -1));
-            resolver.ConfirmCurrent(release, token);
+            progress.Report(new UiStatus("复核可安装版本", "确认下载期间没有更高的可用安装包…", -1));
+            if (!resolver.ConfirmCurrent(release, proxy, installedVersion, token))
+                throw new InvalidOperationException("可安装目标在准备期间已变化。尚未部署，请重新点击安装 / 更新以获取当前可用版本。");
             token.ThrowIfCancellationRequested();
             // 准备阶段不部署；调用方依据用户手动应用或本次自动安装选择决定下一步。
             log.Write("安装包和许可证已准备就绪。下载校验阶段未申请管理员权限，未关闭或修改 ChatGPT。");
@@ -70,18 +80,27 @@ namespace ChatGPTInstaller
             progress.Report(new UiStatus("安装前复核", "重新检查官方版本、本机版本和下载缓存…", -1));
             InstalledPackage installed;
             using (var shell = new PowerShellBridge(null)) installed = shell.FindInstalled();
-            var resolver = new ReleaseResolver(log);
-            var current = resolver.Resolve(PlatformInfo.Architecture(), proxy, token);
+            var resolver = new ReleaseResolver(log, progress);
+            Version installedVersion = installed == null ? null : installed.Version;
+            var selection = resolver.Resolve(PlatformInfo.Architecture(), proxy, installedVersion, token);
             progress.Report(new UiStatus("安装前复核", "官方版本已确认，正在核对准备好的安装包…", -1)
             {
                 CurrentVersion = installed == null ? "尚未安装新版" : installed.Version.ToString(),
-                LatestVersion = current.Version.ToString()
+                Selection = selection
             });
-            if (current.Version != prepared.Release.Version)
+            // 应用等待期间可能已由官方完成更新；先处理无需安装的情况，避免要求重复准备。
+            if (ShouldSkip(installed, prepared.Release.Version, prepared.UpdateOnly) && selection.IsCurrent(installedVersion))
             {
-                string message = "官方版本已从 " + prepared.Release.Version + " 变为 " + current.Version + "，请点击上方安装 / 更新重新准备。尚未执行部署。";
+                Complete(installed.Version, selection.Summary(installed.Version) + "。");
+                ClearPreparedFiles(prepared);
+                return true;
+            }
+            var current = selection.Package;
+            if (current == null || current.Version != prepared.Release.Version)
+            {
+                string message = "可安装目标已变化或不可用，请重新检查并准备。尚未执行部署。";
                 log.Write(message);
-                progress.Report(new UiStatus("准备包已过期，需要重新下载", message, 0));
+                progress.Report(new UiStatus("需要重新检查安装包", message, 0));
                 return false;
             }
             if (ShouldSkip(installed, current.Version, prepared.UpdateOnly))
@@ -92,9 +111,13 @@ namespace ChatGPTInstaller
             }
             if (!prepared.FilesExist()) throw new FileNotFoundException("下载缓存已被移除，请点击上方安装 / 更新重新准备。");
             var info = VerifyPackage(prepared.Release, prepared.PackagePath, token);
-            PackageInfo.CheckLicense(prepared.LicensePath);
+            CheckRetrievedLicense(prepared.LicensePath);
             Paths.RequireSpace(Environment.GetFolderPath(Environment.SpecialFolder.Windows), info.ExpandedSize + 512L * 1024 * 1024, "系统盘");
-            resolver.ConfirmCurrent(current, token);
+            if (!resolver.ConfirmCurrent(current, proxy, installedVersion, token))
+            {
+                progress.Report(new UiStatus("需要重新检查安装包", "可安装目标已变化，请重新准备。尚未执行部署。", 0));
+                return false;
+            }
             token.ThrowIfCancellationRequested();
             deploy(prepared);
             progress.Report(new UiStatus("核对安装结果", "确认当前用户可以访问安装的版本…", -1) { Deployment = true });
@@ -126,19 +149,19 @@ namespace ChatGPTInstaller
                 info = PackageInfo.Read(package, release.Architecture);
                 release.RequireVersion(info.Version, "下载的安装包");
             }
-            catch (InvalidDataException)
+            catch (InvalidDataException ex)
             {
                 Paths.DeleteFile(package);
                 Paths.DeleteFile(package + ".identity");
-                throw;
+                throw new UpdateRetrievalException(UpdateRetrievalStage.Package, ex.Message, ex, true);
             }
             try { SignatureVerifier.Verify(package); }
-            catch
+            catch (Exception ex)
             {
                 Paths.DeleteFile(package);
                 Paths.DeleteFile(package + ".identity");
                 log.Write("签名验证失败，已清除下载缓存，下次将重新下载。");
-                throw;
+                throw new UpdateRetrievalException(UpdateRetrievalStage.Package, ex.Message, ex, true);
             }
             token.ThrowIfCancellationRequested();
             log.Write("Windows 数字签名验证通过；包版本 " + info.Version + "，架构 " + info.Architecture + "。");
@@ -150,6 +173,16 @@ namespace ChatGPTInstaller
             Paths.DeleteFile(prepared.PackagePath);
             Paths.DeleteFile(prepared.PackagePath + ".identity");
             Paths.DeleteFile(prepared.LicensePath);
+        }
+
+        private static void CheckRetrievedLicense(string path)
+        {
+            try { PackageInfo.CheckLicense(path); }
+            catch (Exception ex)
+            {
+                if (!(ex is InvalidDataException) && !(ex is XmlException)) throw;
+                throw new UpdateRetrievalException(UpdateRetrievalStage.Information, ex.Message, ex, true);
+            }
         }
 
         public static bool ShouldSkip(InstalledPackage installed, Version latest, bool updateOnly)

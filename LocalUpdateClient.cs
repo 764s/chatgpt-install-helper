@@ -24,9 +24,9 @@ namespace ChatGPTInstaller
             get { return "ChatGPTInstallHelper-v2-" + WindowsIdentity.GetCurrent().User.Value + "-" + Process.GetCurrentProcess().SessionId; }
         }
 
-        public static object Request(string command, bool autoInstall = false)
+        public static object Request(string command, bool autoInstall = false, OfficialUpdateContext officialContext = null)
         {
-            try { return Send(command, autoInstall, 250); }
+            try { return SendWithContext(command, autoInstall, 250, officialContext); }
             catch (TimeoutException) { }
             using (var gate = new Mutex(false, "Local\\" + PipeName + "-Start"))
             {
@@ -35,13 +35,23 @@ namespace ChatGPTInstaller
                 if (!acquired) throw new TimeoutException("更新器正在启动，请稍后重试。");
                 try
                 {
-                    try { return Send(command, autoInstall, 250); }
+                    try { return SendWithContext(command, autoInstall, 250, officialContext); }
                     catch (TimeoutException) { }
                     StartBackground();
-                    return Send(command, autoInstall, 15000);
+                    return SendWithContext(command, autoInstall, 15000, officialContext);
                 }
                 finally { gate.ReleaseMutex(); }
             }
+        }
+
+        private static object SendWithContext(string command, bool autoInstall, int timeout, OfficialUpdateContext context)
+        {
+            if (context == null) return Send(command, autoInstall, timeout);
+            // 先只读协商，旧后台仍接收原来的两字段请求，不重发已执行的写操作。
+            var state = Send("status", false, timeout);
+            bool supported = object.Equals(JsonData.Get(state as Dictionary<string, object>, "officialCheckSupported"), true);
+            if (command == "status" && !supported) return state;
+            return Send(command, autoInstall, timeout, officialContext: supported ? context : null);
         }
 
         public static bool TryOpenExisting(out IntPtr window)
@@ -58,7 +68,7 @@ namespace ChatGPTInstaller
             catch (InvalidOperationException) { return false; }
         }
 
-        private static object Send(string command, bool autoInstall, int timeout, int responseTimeout = 15000, Action<int> connected = null)
+        private static object Send(string command, bool autoInstall, int timeout, int responseTimeout = 15000, Action<int> connected = null, OfficialUpdateContext officialContext = null)
         {
             using (var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
             {
@@ -71,7 +81,9 @@ namespace ChatGPTInstaller
                 }
                 var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, true) { AutoFlush = true };
                 var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, true);
-                writer.WriteLine(JsonData.Serialize(new { command = command, autoInstall = autoInstall }));
+                var request = new Dictionary<string, object> { { "command", command }, { "autoInstall", autoInstall } };
+                if (officialContext != null) request.Add("officialContext", officialContext);
+                writer.WriteLine(JsonData.Serialize(request));
                 var read = reader.ReadLineAsync();
                 if (!read.Wait(responseTimeout)) throw new IOException("更新器暂时没有响应，请稍后重试。");
                 string line = read.GetAwaiter().GetResult();

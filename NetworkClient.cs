@@ -64,6 +64,11 @@ namespace ChatGPTInstaller
 
         public byte[] GetSmall(Uri uri, int limit, CancellationToken token)
         {
+            return ReadMetadataWithRetry(() => GetSmallOnce(uri, limit, token), token);
+        }
+
+        private byte[] GetSmallOnce(Uri uri, int limit, CancellationToken token)
+        {
             var request = Request(uri, null, null);
             using (token.Register(request.Abort))
             using (var response = Response(request, token))
@@ -84,6 +89,11 @@ namespace ChatGPTInstaller
 
         public void Probe(ReleaseInfo release, CancellationToken token)
         {
+            ReadMetadataWithRetry(() => { ProbeOnce(release, token); return true; }, token);
+        }
+
+        private void ProbeOnce(ReleaseInfo release, CancellationToken token)
+        {
             // 某些 CDN 拒绝 HEAD；范围 GET 同时提供版本、ETag 和完整文件大小。
             var request = Request(release.PackageUrl, 0, 0);
             using (token.Register(request.Abort))
@@ -92,23 +102,62 @@ namespace ChatGPTInstaller
                 release.ETag = response.Headers[HttpResponseHeader.ETag];
                 release.Size = response.StatusCode == HttpStatusCode.PartialContent
                     ? RangeTotal(response.Headers[HttpResponseHeader.ContentRange], 0) : response.ContentLength;
+                bool discoverVersion = release.Version == null;
                 string declaredVersion = response.Headers["x-ms-meta-package_version"];
+                if (discoverVersion && string.IsNullOrEmpty(declaredVersion))
+                    throw new InvalidDataException("官方通用下载入口未提供包版本，不能将其作为历史候选。");
                 if (!string.IsNullOrEmpty(declaredVersion))
                 {
                     Version version;
-                    if (!Version.TryParse(declaredVersion, out version))
+                    if (!ReleaseManifest.TryVersion(declaredVersion, out version))
                         throw new InvalidDataException("官方安装包的版本元数据无效。");
+                    if (discoverVersion) release.Version = version;
                     release.RequireVersion(version, "服务器包元数据");
                 }
                 string identity = response.Headers["x-ms-meta-package_identity"];
-                if (!string.IsNullOrEmpty(identity) && identity != AppInfo.PackageName)
+                if ((discoverVersion || !string.IsNullOrEmpty(identity)) && identity != AppInfo.PackageName)
                     throw new InvalidDataException("官方包标识发生变化，需要更新安装助手后再继续。");
                 string architecture = response.Headers["x-ms-meta-architecture"];
-                if (!string.IsNullOrEmpty(architecture) && architecture != release.Architecture)
+                if ((discoverVersion || !string.IsNullOrEmpty(architecture)) && architecture != release.Architecture)
                     throw new InvalidDataException("官方安装包的处理器架构不匹配。");
                 if (release.Size < 1024 || release.Size > 16L * 1024 * 1024 * 1024)
                     throw new InvalidDataException("无法确认官方安装包大小。");
             }
+        }
+
+        private T ReadMetadataWithRetry<T>(Func<T> read, CancellationToken token)
+        {
+            for (int attempt = 0; ; attempt++)
+            {
+                token.ThrowIfCancellationRequested();
+                try { return read(); }
+                catch (WebException ex)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var response = ex.Response as HttpWebResponse;
+                    int code = response == null ? 0 : (int)response.StatusCode;
+                    bool transient = code == 408 || code == 429 || code >= 500 ||
+                        ex.Status == WebExceptionStatus.Timeout || ex.Status == WebExceptionStatus.ConnectFailure ||
+                        ex.Status == WebExceptionStatus.NameResolutionFailure || ex.Status == WebExceptionStatus.ConnectionClosed ||
+                        ex.Status == WebExceptionStatus.ReceiveFailure || ex.Status == WebExceptionStatus.SendFailure;
+                    if (attempt != 0 || !transient) throw;
+                    if (response != null) response.Dispose();
+                    log.Write("官方元数据连接暂时失败，重试一次：" + ex.Message);
+                    if (token.WaitHandle.WaitOne(500)) token.ThrowIfCancellationRequested();
+                }
+            }
+        }
+
+        public ReleaseInfo ProbeAvailable(string architecture, CancellationToken token)
+        {
+            var release = new ReleaseInfo
+            {
+                Architecture = architecture,
+                PackageUrl = new Uri(AppInfo.DownloadRoot + "ChatGPT-" + architecture + ".msix"),
+                LicenseUrl = new Uri(AppInfo.DownloadRoot + "ChatGPT-License.xml")
+            };
+            Probe(release, token);
+            return release;
         }
 
         public static long RangeTotal(string header, long expectedStart)
@@ -186,7 +235,7 @@ namespace ChatGPTInstaller
                             long lastReport = -1000;
                             byte[] buffer = new byte[256 * 1024];
                             int read;
-                            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                            while ((read = ReadPackageBytes(input, buffer)) > 0)
                             {
                                 token.ThrowIfCancellationRequested();
                                 received += read;
@@ -205,7 +254,7 @@ namespace ChatGPTInstaller
                                     });
                                 }
                             }
-                            if (received != release.Size) throw new IOException("连接提前结束，将继续下载。");
+                            if (received != release.Size) throw new UpdateRetrievalException(UpdateRetrievalStage.Package, "连接提前结束，将继续下载。");
                         }
                     }
                     return part;
@@ -213,7 +262,11 @@ namespace ChatGPTInstaller
                 catch (Exception ex)
                 {
                     token.ThrowIfCancellationRequested();
-                    if (ex is InvalidDataException) { Paths.DeleteFile(part); throw; }
+                    if (ex is InvalidDataException)
+                    {
+                        Paths.DeleteFile(part);
+                        throw new UpdateRetrievalException(UpdateRetrievalStage.Package, ex.Message, ex, true);
+                    }
                     if (!(ex is IOException) && !(ex is WebException)) throw;
                     var web = ex as WebException;
                     var errorResponse = web == null ? null : web.Response as HttpWebResponse;
@@ -224,7 +277,7 @@ namespace ChatGPTInstaller
                         if (status == 412 || status == 416)
                         {
                             Paths.DeleteFile(part);
-                            throw new IOException("官方包已更新，请重新点击按钮获取最新版。", ex);
+                            throw new UpdateRetrievalException(UpdateRetrievalStage.Package, "官方包已更新，请重新点击按钮获取最新版。", ex);
                         }
                     }
                     last = ex;
@@ -232,7 +285,16 @@ namespace ChatGPTInstaller
                     if (attempt < 3 && token.WaitHandle.WaitOne(attempt * 1000)) token.ThrowIfCancellationRequested();
                 }
             }
-            throw new IOException("下载未完成，已保留进度。检查代理后再次点击即可续传。", last);
+            const string failure = "下载未完成，已保留进度。检查代理后再次点击即可续传。";
+            if (last is WebException || last is UpdateRetrievalException)
+                throw new UpdateRetrievalException(UpdateRetrievalStage.Package, failure, last);
+            throw new IOException(failure, last);
+        }
+
+        private static int ReadPackageBytes(Stream input, byte[] buffer)
+        {
+            try { return input.Read(buffer, 0, buffer.Length); }
+            catch (IOException ex) { throw new UpdateRetrievalException(UpdateRetrievalStage.Package, ex.Message, ex); }
         }
 
         public static string FormatBytes(long bytes)

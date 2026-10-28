@@ -26,6 +26,7 @@ namespace ChatGPTInstaller
         private readonly OperationButton commit;
         private readonly Label preparation;
         private readonly Label cacheNotice;
+        private readonly Label officialNotice;
         private readonly TableLayoutPanel preparedRow;
         private readonly Button cancel;
         private readonly Button launch;
@@ -44,6 +45,12 @@ namespace ChatGPTInstaller
         private bool closeAfterStartup;
         private PreparedInstallation prepared;
         private PackageCacheInfo cacheStatus;
+        private ReleaseSelection releaseSelection;
+        private OfficialUpdateContext officialContext;
+        private OfficialUpdateContext operationOfficialContext;
+        private DateTime officialContextReceivedAt;
+        private OfficialUpdateResult officialResult;
+        private bool checkingOfficial;
         private bool installedAvailable;
         private bool retryPrepared;
         private string finishedMessage;
@@ -58,6 +65,7 @@ namespace ChatGPTInstaller
         private DateTime lastSidebarRequest = DateTime.UtcNow;
         private string currentVersionText;
         private string latestVersionText;
+        private string latestVersionLabel = "官方最新版";
         private string lastFailure;
         private UiStatus lastStatus = new UiStatus("准备检查更新", "", 0);
         private readonly string sidebarSessionId = Guid.NewGuid().ToString("N");
@@ -74,9 +82,11 @@ namespace ChatGPTInstaller
             ClientSize = new Size(820, 730);
             MinimumSize = new Size(760, 690);
             StartPosition = FormStartPosition.CenterScreen;
-            var grid = new TableLayoutPanel { MaximumSize = new Size(1040, 0), Padding = new Padding(28, 22, 28, 18), ColumnCount = 1, RowCount = 12 };
+            var grid = new TableLayoutPanel { MaximumSize = new Size(1040, 0), Padding = new Padding(28, 22, 28, 18), ColumnCount = 1, RowCount = 13 };
             Resize += delegate { FitContent(grid); };
-            foreach (float height in new[] { 44F, 31F, 65F, 80F, 96F, 39F, 22F, 36F, 25F }) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            foreach (float height in new[] { 44F, 31F, 65F, 80F, 96F, 39F, 22F, 36F }) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
             grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 43));
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
@@ -135,7 +145,9 @@ namespace ChatGPTInstaller
             grid.Controls.Add(bar, 0, 6);
             detail = new Label { Text = "可先仅检查更新，查看累计更新内容。", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(90, 108, 101), AutoEllipsis = true };
             grid.Controls.Add(detail, 0, 7);
-            grid.Controls.Add(new Label { Text = "更新内容与本次操作记录（完整技术详情保存在日志中）", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(90, 108, 101), Font = new Font(Font.FontFamily, 9F) }, 0, 8);
+            officialNotice = new Label { AutoSize = true, Dock = DockStyle.Fill, Visible = false, Padding = new Padding(10, 8, 10, 8), Margin = new Padding(0, 0, 0, 8), Font = new Font(Font.FontFamily, 9F), AccessibleName = "官方更新方式核对" };
+            grid.Controls.Add(officialNotice, 0, 8);
+            grid.Controls.Add(new Label { Text = "更新内容与本次操作记录（完整技术详情保存在日志中）", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(90, 108, 101), Font = new Font(Font.FontFamily, 9F) }, 0, 9);
             history = new TextBox
             {
                 Dock = DockStyle.Fill, ReadOnly = true, BorderStyle = BorderStyle.None, BackColor = Color.White,
@@ -160,7 +172,7 @@ namespace ChatGPTInstaller
             historyPage.Controls.Add(history);
             information.TabPages.AddRange(new[] { notesPage, historyPage });
             information.TabPages.Add(CreateSidebarPage());
-            grid.Controls.Add(information, 0, 9);
+            grid.Controls.Add(information, 0, 10);
             var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 7, 0, 0), WrapContents = false };
             network = new LinkLabel { Text = "网络设置", AutoSize = true, Margin = new Padding(0, 7, 16, 0), LinkColor = Color.FromArgb(27, 106, 86) };
             var copy = new LinkLabel { Text = "复制完整日志", AutoSize = true, Margin = new Padding(0, 7, 16, 0), LinkColor = network.LinkColor };
@@ -168,8 +180,8 @@ namespace ChatGPTInstaller
             cancel = new Button { Text = "取消", Size = new Size(85, 29), Enabled = false, Visible = false, FlatStyle = FlatStyle.Flat };
             launch = new Button { Text = "打开 ChatGPT", Size = new Size(126, 29), Enabled = false, FlatStyle = FlatStyle.Flat };
             footer.Controls.AddRange(new Control[] { network, copy, logs, cancel, launch });
-            grid.Controls.Add(footer, 0, 10);
-            grid.Controls.Add(new Label { Text = "非官方辅助工具  ·  安装包与离线许可证由 OpenAI 官方提供", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(117, 128, 123), Font = new Font(Font.FontFamily, 8F), Padding = new Padding(0, 4, 0, 0) }, 0, 11);
+            grid.Controls.Add(footer, 0, 11);
+            grid.Controls.Add(new Label { Text = "非官方辅助工具  ·  安装包与离线许可证由 OpenAI 官方提供", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(117, 128, 123), Font = new Font(Font.FontFamily, 8F), Padding = new Padding(0, 4, 0, 0) }, 0, 12);
 
             log = new RunLog();
             log.Added += AppendLog;
@@ -322,6 +334,7 @@ namespace ChatGPTInstaller
         private void FitContent(Control content)
         {
             int width = Math.Min(ClientSize.Width, content.MaximumSize.Width);
+            if (officialNotice != null) officialNotice.MaximumSize = new Size(Math.Max(200, width - 56), 0);
             content.SetBounds(Math.Max(0, (ClientSize.Width - width) / 2), 0, width, ClientSize.Height);
         }
 
@@ -340,6 +353,10 @@ namespace ChatGPTInstaller
             retryPrepared = false;
             lastFailure = null;
             cacheStatus = null;
+            officialResult = null;
+            officialNotice.Visible = false;
+            operationOfficialContext = officialContext != null && DateTime.UtcNow - officialContextReceivedAt < TimeSpan.FromMinutes(2)
+                ? officialContext : OfficialUpdateContext.Capture();
         }
 
         private OperationButton CreateActionButton(string text, string runningText)
@@ -365,10 +382,15 @@ namespace ChatGPTInstaller
             information.SelectedIndex = 1;
             var progress = new Progress<UiStatus>(ShowStatus);
             log.Write(autoInstallSelected ? "开始准备更新包；你已选择下载完成后自动安装并重启。" : updateOnly ? "开始准备更新包，下载完成后等待手动安装。" : "开始准备安装 / 修复包，下载完成后等待手动安装。");
+            UpdateRetrievalStage? officialStage = null;
             try
             {
                 prepared = await Task.Run(() => new InstallerWorkflow(log, progress).Prepare(updateOnly, proxy, cancellation.Token));
-                if (prepared == null) installedAvailable = true;
+                if (prepared == null && finishedMessage == null && releaseSelection != null)
+                {
+                    preparationNotice = lastStatus.Detail;
+                    if (releaseSelection.Package == null) officialStage = UpdateRetrievalStage.Package;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -380,11 +402,13 @@ namespace ChatGPTInstaller
             catch (Exception ex)
             {
                 autoInstallSelected = false;
+                var retrieval = ex as UpdateRetrievalException;
+                if (retrieval != null) officialStage = retrieval.Stage;
                 string message = ErrorMessages.Explain(ex);
                 lastFailure = message;
                 cacheStatus = null;
                 preparationNotice = message;
-                ShowStatus(new UiStatus("准备未完成", message, 0));
+                ShowStatus(new UiStatus("准备未完成", message, 0) { LatestVersion = latestVersionText == "查询中…" ? "未能读取" : null });
                 log.Write(message);
                 log.WriteTechnical(ex.ToString());
             }
@@ -397,6 +421,8 @@ namespace ChatGPTInstaller
                 cancellation = null;
                 if (closeAfterCancel) Close();
             }
+            if (officialStage.HasValue && !closeAfterCancel && !IsDisposed)
+                await DiagnoseOfficial(officialStage.Value, updateOnly ? update : install);
             // 自动安装只属于用户本次下载选择；取消、失败和以后重新打开都不会继承该授权。
             bool applyAutomatically = autoInstallSelected && prepared != null && !closeAfterCancel;
             autoInstallSelected = false;
@@ -416,6 +442,7 @@ namespace ChatGPTInstaller
             information.SelectedIndex = 1;
             var progress = new Progress<UiStatus>(ShowStatus);
             log.Write("已收到应用更新请求，开始部署前复核。");
+            UpdateRetrievalStage? officialStage = null;
             try
             {
                 bool complete = await Task.Run(() => new InstallerWorkflow(log, progress).InstallPrepared(selection, proxy, cancellation.Token));
@@ -439,7 +466,11 @@ namespace ChatGPTInstaller
                         }
                     }
                 }
-                else preparationNotice = "官方版本已变化，请点击上方安装 / 更新重新准备。尚未执行部署。";
+                else
+                {
+                    preparationNotice = "可安装目标已变化或不可用，请重新检查并准备。尚未执行部署。";
+                    if (releaseSelection != null && releaseSelection.Package == null && !releaseSelection.IsCurrent(ReadCurrentVersion())) officialStage = UpdateRetrievalStage.Package;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -449,7 +480,9 @@ namespace ChatGPTInstaller
             }
             catch (Exception ex)
             {
-                if (ex is InvalidDataException || !selection.FilesExist()) prepared = null;
+                var retrieval = ex as UpdateRetrievalException;
+                if (retrieval != null) officialStage = retrieval.Stage;
+                if (ex is InvalidDataException || (retrieval != null && retrieval.InvalidatesPackage) || !selection.FilesExist()) prepared = null;
                 string message = ErrorMessages.Explain(ex);
                 lastFailure = message;
                 preparationNotice = message;
@@ -467,6 +500,7 @@ namespace ChatGPTInstaller
                 cancellation = null;
                 if (closeAfterCancel) Close();
             }
+            if (officialStage.HasValue && !closeAfterCancel && !IsDisposed) await DiagnoseOfficial(officialStage.Value, selection.UpdateOnly ? update : install);
         }
 
         private async Task CheckOnly()
@@ -482,6 +516,7 @@ namespace ChatGPTInstaller
             notes.Text = "正在读取本机版本、官方版本和累计更新内容…";
             var progress = new Progress<UiStatus>(ShowStatus);
             log.Write("开始仅检查更新，不下载安装包、不改动应用。");
+            UpdateRetrievalStage? officialStage = null;
             try
             {
                 var result = await Task.Run(() => new UpdateChecker(log, progress).Check(proxy, cancellation.Token));
@@ -491,9 +526,11 @@ namespace ChatGPTInstaller
                 installedAvailable = result.InstalledVersion != null;
                 checkCompleted = result.LocalError == null && result.LatestVersion != null;
                 cacheStatus = result.Cache;
-                if (result.UpdateAvailable != false && cacheStatus != null)
+                releaseSelection = result.Selection;
+                if (result.LocalError == null && result.Selection.Package == null && !result.Selection.IsCurrent(result.InstalledVersion)) officialStage = UpdateRetrievalStage.Package;
+                if (result.Selection.CanUpdate(result.InstalledVersion) && cacheStatus != null)
                     ShowStatus(new UiStatus(cacheStatus.Summary, result.Summary, cacheStatus.Size > 0 ? (int)(cacheStatus.Bytes * 100 / cacheStatus.Size) : 0));
-                if (prepared != null && (result.LatestVersion != prepared.Release.Version ||
+                if (prepared != null && (result.AvailableVersion != prepared.Release.Version ||
                     (result.InstalledVersion != null && InstallerWorkflow.ShouldSkip(new InstalledPackage { Version = result.InstalledVersion }, prepared.Release.Version, prepared.UpdateOnly))))
                 {
                     prepared = null;
@@ -501,7 +538,7 @@ namespace ChatGPTInstaller
                 }
                 if (prepared == null)
                 {
-                    if (result.UpdateAvailable == false) finishedMessage = result.Summary;
+                    if (result.LocalError == null && result.Selection.IsCurrent(result.InstalledVersion)) finishedMessage = result.Summary;
                     else preparationNotice = result.Summary;
                 }
             }
@@ -514,16 +551,68 @@ namespace ChatGPTInstaller
             }
             catch (Exception ex)
             {
+                var retrieval = ex as UpdateRetrievalException;
+                if (retrieval != null) officialStage = retrieval.Stage;
                 string message = ErrorMessages.Explain(ex);
                 lastFailure = message;
                 preparationNotice = message;
                 notes.Text = "检查未完成，暂时无法判断是否有更新。" + Environment.NewLine + message;
-                ShowStatus(new UiStatus("检查未完成", message, 0));
+                ShowStatus(new UiStatus("检查未完成", message, 0) { LatestVersion = latestVersionText == "查询中…" ? "未能读取" : null });
                 log.Write(message);
                 log.WriteTechnical(ex.ToString());
             }
             finally
             {
+                SetBusy(false);
+                cancellation.Dispose();
+                cancellation = null;
+                if (closeAfterCancel) Close();
+            }
+            if (officialStage.HasValue && !closeAfterCancel && !IsDisposed)
+            {
+                await DiagnoseOfficial(officialStage.Value, check);
+                if (!IsDisposed && officialResult != null) notes.AppendText(Environment.NewLine + Environment.NewLine + "官方更新方式核对：" + officialResult.Message);
+            }
+        }
+
+        private async Task DiagnoseOfficial(UpdateRetrievalStage stage, OperationButton action)
+        {
+            if (checkingOfficial || officialResult != null || busy) return;
+            checkingOfficial = true;
+            autoInstallSelected = false;
+            cancellation = new CancellationTokenSource();
+            cancellation.CancelAfter(12000);
+            SetBusy(true, action, "核对官方更新方式…");
+            officialNotice.BackColor = Color.FromArgb(239, 243, 241);
+            officialNotice.ForeColor = Color.FromArgb(65, 85, 77);
+            officialNotice.Text = "本次获取失败，正在只读核对 Codex 自带更新器…";
+            officialNotice.Visible = true;
+            log.Write("获取失败保护：开始只读核对官方更新方式，不下载、安装或重启。");
+            try
+            {
+                var token = cancellation.Token;
+                officialResult = await Task.Run(() => OfficialUpdateCheck.Check(operationOfficialContext, stage, token));
+            }
+            catch (Exception ex)
+            {
+                officialResult = OfficialUpdateResult.Unknown(cancellation.IsCancellationRequested
+                    ? "官方核对已取消或超时，原失败原因仍保留，未判定更新途径变化。"
+                    : "未能完成官方只读更新检查，原失败原因仍保留，未判定更新途径变化。");
+                log.WriteTechnical(ex.ToString());
+            }
+            finally
+            {
+                checkingOfficial = false;
+                if (officialResult != null)
+                {
+                    officialNotice.Text = officialResult.Message;
+                    if (officialResult.SuggestRepair)
+                    {
+                        officialNotice.BackColor = Color.FromArgb(255, 246, 228);
+                        officialNotice.ForeColor = Color.FromArgb(132, 76, 27);
+                    }
+                    log.Write("官方核对：" + officialResult.Message);
+                }
                 SetBusy(false);
                 cancellation.Dispose();
                 cancellation = null;
@@ -550,8 +639,23 @@ namespace ChatGPTInstaller
             if (status.LatestVersion != null)
             {
                 latestVersionText = status.LatestVersion;
-                latest.Text = "官方最新版\n" + status.LatestVersion;
-                if (cacheStatus != null && status.LatestVersion != cacheStatus.Version.ToString()) cacheStatus = null;
+                latestVersionLabel = status.LatestVersionLabel ?? "官方最新版";
+                latest.Text = latestVersionLabel + "\n" + status.LatestVersion;
+                // 清单已读取但候选尚未选定，旧缓存不能冒充本次目标。
+                releaseSelection = null;
+                cacheStatus = null;
+                checkCompleted = false;
+            }
+            if (status.Selection != null)
+            {
+                releaseSelection = status.Selection;
+                latestVersionText = releaseSelection.LatestVersion.ToString();
+                latestVersionLabel = releaseSelection.VersionLabel;
+                latest.Text = latestVersionLabel + "\n" + latestVersionText;
+                if (releaseSelection.IsFallback) latest.Text += "\n可安装：" + releaseSelection.AvailableVersion;
+                else if (releaseSelection.LatestPackageMissing) latest.Text += "\n暂未找到独立安装包";
+                if (cacheStatus != null && cacheStatus.Version != releaseSelection.AvailableVersion) cacheStatus = null;
+                checkCompleted = ReadCurrentVersion() != null || currentVersionText == "尚未安装新版";
             }
             if (status.Cache != null) cacheStatus = status.Cache;
             phase.Text = status.Phase;
@@ -587,12 +691,17 @@ namespace ChatGPTInstaller
             bool ready = prepared != null && !busy;
             bool finished = prepared == null && finishedMessage != null && !busy;
             bool canOpen = finished && installedAvailable;
-            bool canPrepare = !busy && prepared == null && !finished && cacheStatus != null && lastFailure == null;
+            bool canPrepare = !busy && prepared == null && !finished && cacheStatus != null && lastFailure == null &&
+                checkCompleted && releaseSelection != null && releaseSelection.CanUpdate(ReadCurrentVersion());
             launch.Visible = !canOpen;
             commit.SetRunningState(!ready && !canOpen && !canPrepare, confirming);
             preparedRow.BackColor = Color.White;
             preparation.ForeColor = Color.FromArgb(65, 85, 77);
             cacheNotice.Text = !finished && cacheStatus != null ? cacheStatus.Notice ?? "" : "";
+            if (releaseSelection != null && !string.IsNullOrEmpty(releaseSelection.SourceNotice))
+                cacheNotice.Text += (cacheNotice.Text.Length == 0 ? "" : " ") + releaseSelection.SourceNotice;
+            if (releaseSelection != null && releaseSelection.LatestPackageMissing)
+                cacheNotice.Text += (cacheNotice.Text.Length == 0 ? "" : " ") + "候选可能不含全部历史版本，详见检查报告。";
 
             if (integrating)
             {
@@ -612,7 +721,8 @@ namespace ChatGPTInstaller
             else if (prepared != null)
             {
                 commit.Text = retryPrepared ? (prepared.UpdateOnly ? "重试更新" : "重试安装") : prepared.UpdateOnly ? "立即更新" : "立即安装 / 重装";
-                preparation.Text = preparationNotice ?? "已准备 " + prepared.Release.Version + "，可继续运行任务。\n任务结束并保存工作后，点击右侧按钮安装。";
+                preparation.Text = preparationNotice ?? "已准备 " + prepared.Release.Version + "，可继续运行任务。\n" +
+                    (releaseSelection != null && releaseSelection.IsFallback ? "官方最新版暂缺安装包；" : "") + "任务结束并保存后，点击右侧按钮安装。";
                 preparedRow.BackColor = preparationNotice == null ? Color.FromArgb(236, 247, 241) : Color.FromArgb(255, 246, 228);
             }
             else if (busy)
@@ -630,7 +740,8 @@ namespace ChatGPTInstaller
             else if (canPrepare)
             {
                 commit.Text = cacheStatus.ActionText;
-                preparation.Text = cacheStatus.Summary + "\n" + (cacheStatus.Complete ? "可直接复用完整包；校验通过后由你决定安装时机。" : "点击下载更新，或在上方选择安装 / 重装。");
+                preparation.Text = (releaseSelection.IsFallback ? releaseSelection.Summary(ReadCurrentVersion()) : cacheStatus.Summary) + "\n" +
+                    (cacheStatus.Complete ? "可直接复用完整包；校验通过后由你决定安装时机。" : "点击下载更新，或在上方选择安装 / 重装。");
             }
             else if (preparationNotice != null)
             {
@@ -660,8 +771,9 @@ namespace ChatGPTInstaller
             detail.Text = "正在取消当前操作…";
         }
 
-        internal object HandleSidebarCommand(string command, bool autoInstall)
+        internal object HandleSidebarCommand(string command, bool autoInstall, OfficialUpdateContext context = null)
         {
+            if (context != null) { officialContext = context; officialContextReceivedAt = DateTime.UtcNow; }
             sidebarConnected = true;
             lastSidebarRequest = DateTime.UtcNow;
             switch (command)
@@ -692,25 +804,42 @@ namespace ChatGPTInstaller
                 case "cancel": Cancel(); break;
                 default: throw new InvalidDataException("未知的更新器操作。");
             }
-            Version currentVersion;
-            Version latestVersion;
-            bool hasCurrentVersion = Version.TryParse(currentVersionText, out currentVersion);
-            bool hasLatestVersion = Version.TryParse(latestVersionText, out latestVersion);
-            bool versionsKnown = hasCurrentVersion && hasLatestVersion;
-            bool upToDate = versionsKnown && currentVersion >= latestVersion;
-            string state = busy ? preparing ? "downloading" : confirming ? "installing" : "checking" : prepared != null ? "ready" : lastFailure != null ? "error" : upToDate ? "current" : checkCompleted ? "available" : "idle";
+            Version currentVersion = ReadCurrentVersion();
+            bool upToDate = releaseSelection != null && releaseSelection.IsCurrent(currentVersion);
+            bool canDownload = checkCompleted && releaseSelection != null && releaseSelection.CanUpdate(currentVersion);
+            string state = busy ? checkingOfficial ? "diagnosing" : preparing ? "downloading" : confirming ? "installing" : "checking" : prepared != null ? "ready" : lastFailure != null ? "error" : upToDate ? "current" :
+                canDownload ? "available" : checkCompleted ? "unavailable" : "idle";
             return new
             {
                 helperVersion = SidebarIntegration.VersionString, sessionId = sidebarSessionId, state = state, busy = busy,
+                officialCheckSupported = true,
+                diagnosticStatus = checkingOfficial ? "checking" : officialResult == null ? null : officialResult.Status,
+                diagnosticMessage = checkingOfficial ? "本次获取失败，正在只读核对 Codex 自带更新器…" : officialResult == null ? null : officialResult.Message,
+                diagnosticSuggestRepair = officialResult != null && officialResult.SuggestRepair,
                 currentVersion = currentVersionText, latestVersion = latestVersionText,
-                phase = lastStatus.Phase, detail = lastFailure ?? lastStatus.Detail, percent = lastStatus.Percent,
-                ready = prepared != null && !busy, upToDate = upToDate, checkedVersion = checkCompleted || versionsKnown,
+                preparedVersion = prepared == null ? null : prepared.Release.Version.ToString(),
+                latestVersionLabel = latestVersionLabel,
+                availableVersion = releaseSelection == null || releaseSelection.AvailableVersion == null ? null : releaseSelection.AvailableVersion.ToString(),
+                isFallback = releaseSelection != null && releaseSelection.IsFallback,
+                availabilityNotice = releaseSelection == null ? null : releaseSelection.Notice,
+                candidateNotice = releaseSelection == null ? null : releaseSelection.CandidateNotice,
+                canDownload = canDownload,
+                phase = checkingOfficial ? "核对官方更新方式" : lastStatus.Phase,
+                detail = checkingOfficial ? "只读取官方状态，不下载、安装或重启。" : lastFailure ?? lastStatus.Detail,
+                percent = checkingOfficial ? -1 : lastStatus.Percent,
+                ready = prepared != null && !busy, upToDate = upToDate, checkedVersion = checkCompleted,
                 autoInstall = autoInstallSelected, canCancel = cancellation != null && !deploying && !cancellation.IsCancellationRequested,
                 cacheState = cacheStatus == null ? "unknown" : cacheStatus.State,
                 cacheSummary = cacheStatus == null ? null : cacheStatus.Summary,
                 cacheNotice = cacheStatus == null ? null : cacheStatus.Notice,
                 error = lastFailure
             };
+        }
+
+        private Version ReadCurrentVersion()
+        {
+            Version version;
+            return Version.TryParse(currentVersionText, out version) ? version : null;
         }
 
         private async void RunSidebarOperation(Task operation)
