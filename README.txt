@@ -1,9 +1,9 @@
-﻿ChatGPT 安装助手 1.6.10 源码
+﻿ChatGPT 安装助手 1.6.11 源码
 
 这是 Windows Forms / C# 5 单文件 EXE 项目，使用 Windows 自带 .NET Framework 4.x 和 Windows PowerShell 5.1 组件，无 NuGet 依赖。
 
 编译：在 PowerShell 中运行本目录的 build.ps1。
-默认在上一级目录生成 ChatGPTInstaller-1.6.10.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
+默认在上一级目录生成 ChatGPTInstaller-1.6.11.exe。可通过 -OutputPath 指定文件路径。Sidebar 文件夹中的页面与图标会作为资源内嵌到 EXE。
 编译脚本使用系统内置 csc.exe；不需要 Visual Studio 或 .NET SDK。
 
 主要代码

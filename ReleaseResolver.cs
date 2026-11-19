@@ -15,11 +15,36 @@ namespace ChatGPTInstaller
 
         public ReleaseResolver(RunLog log, IProgress<UiStatus> progress) { this.log = log; this.progress = progress; }
 
-        public ReleaseSelection Resolve(string architecture, string customProxy, Version installed, CancellationToken token)
+        public ReleaseSelection Resolve(string architecture, string customProxy, Version installed, CancellationToken token, OfficialUpdateContext codexContext = null)
         {
-            try { return ResolveCore(architecture, customProxy, installed, token); }
+            ReleaseSelection selection;
+            try { selection = ResolveCore(architecture, customProxy, installed, token); }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { throw new UpdateRetrievalException(UpdateRetrievalStage.Information, ex.Message, ex); }
+            // 仅检查操作传入会话。官方状态补充设备可用性，不能充当独立安装包。
+            if (codexContext != null && selection.IsOfflineCurrent(installed))
+            {
+                progress.Report(new UiStatus("核对 Codex 更新", "正在读取 Codex 自带更新器的状态…", -1));
+                using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+                {
+                    timeout.CancelAfter(4000);
+                    try
+                    {
+                        var native = OfficialUpdateCheck.Check(codexContext, null, timeout.Token);
+                        timeout.Token.ThrowIfCancellationRequested();
+                        selection.CodexStatus = native.Status;
+                        log.Write("Codex 自带更新器状态：" + native.Status);
+                    }
+                    catch (Exception ex)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        log.Write("暂未取得 Codex 自带更新状态，保留本次清单结果：" + ex.Message);
+                    }
+                }
+            }
+            token.ThrowIfCancellationRequested();
+            progress.Report(new UiStatus("版本检查完成", selection.Summary(installed), -1) { Selection = selection });
+            return selection;
         }
 
         private ReleaseSelection ResolveCore(string architecture, string customProxy, Version installed, CancellationToken token)
@@ -63,7 +88,8 @@ namespace ChatGPTInstaller
                     var selection = new ReleaseSelection
                     {
                         LatestVersion = latest,
-                        VersionLabel = publishedVersion != null ? "离线发布最新版" : "官方最新版",
+                        StoreVersion = announced == null ? null : announced.Version,
+                        VersionLabel = publishedVersion != null ? "离线发布最新版" : "Store 发布版本",
                         SourceNotice = announced == null ? "Store 版本标记暂不可用，以下仅代表官方离线发布版本。" :
                             publishedVersion == null ? "离线发布清单暂不可用，本次使用版本标记及兼容下载入口。" :
                             announced.Version > publishedVersion ? "Store 发布标记为 " + announced.Version + "；独立安装以官方离线清单为准，两条通道可能不同步。" : null
@@ -82,7 +108,6 @@ namespace ChatGPTInstaller
                         log.Write("本次安装目标：" + selection.Package.Version);
                         log.Write("安装来源：" + selection.Package.PackageUrl.GetLeftPart(UriPartial.Path));
                     }
-                    progress.Report(new UiStatus("版本检查完成", selection.Summary(installed), -1) { Selection = selection });
                     return selection;
                 }
                 catch (Exception ex)

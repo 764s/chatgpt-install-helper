@@ -19,7 +19,7 @@ namespace ChatGPTInstaller
     {
         private const int MaximumFrameBytes = 1024 * 1024;
 
-        public static OfficialUpdateResult Check(OfficialUpdateContext context, UpdateRetrievalStage stage, CancellationToken token)
+        public static OfficialUpdateResult Check(OfficialUpdateContext context, UpdateRetrievalStage? failedStage, CancellationToken token)
         {
             if (context == null)
                 return OfficialUpdateResult.Unknown("当前没有 Codex 提供的官方检查连接，未能交叉核对。可从 Codex 插件页面重试；原失败原因仍保留。");
@@ -59,11 +59,11 @@ namespace ChatGPTInstaller
                 };
                 if (!string.IsNullOrWhiteSpace(context.HostId)) arguments.Add("hostId", context.HostId);
                 var reply = Request(pipe, 2, "tools/call", arguments, token) as Dictionary<string, object>;
-                return ParseResult(reply, stage);
+                return ParseResult(reply, failedStage);
             }
         }
 
-        internal static OfficialUpdateResult ParseResult(Dictionary<string, object> reply, UpdateRetrievalStage stage)
+        internal static OfficialUpdateResult ParseResult(Dictionary<string, object> reply, UpdateRetrievalStage? failedStage)
         {
             if (!object.Equals(JsonData.Get(reply, "success"), true))
                 return OfficialUpdateResult.Unknown("官方只读更新检查未成功，本次不能确认更新途径是否变化。");
@@ -90,7 +90,11 @@ namespace ChatGPTInstaller
                     reportedStatus = status;
                 }
             }
-            if (reportedStatus != null) return OfficialUpdateResult.FromStatus(reportedStatus, stage);
+            if (reportedStatus != null)
+            {
+                if (failedStage.HasValue) return OfficialUpdateResult.FromStatus(reportedStatus, failedStage.Value);
+                return new OfficialUpdateResult { Status = reportedStatus };
+            }
             return OfficialUpdateResult.Unknown("官方检查返回了无法识别的结果，本次未确认更新途径变化。");
         }
 

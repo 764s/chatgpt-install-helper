@@ -352,6 +352,8 @@ namespace ChatGPTInstaller
             preparationNotice = null;
             retryPrepared = false;
             lastFailure = null;
+            checkCompleted = false;
+            releaseSelection = null;
             cacheStatus = null;
             officialResult = null;
             officialNotice.Visible = false;
@@ -389,7 +391,7 @@ namespace ChatGPTInstaller
                 if (prepared == null && finishedMessage == null && releaseSelection != null)
                 {
                     preparationNotice = lastStatus.Detail;
-                    if (releaseSelection.Package == null) officialStage = UpdateRetrievalStage.Package;
+                    if (releaseSelection.Package == null && !releaseSelection.IsOfflineCurrent(ReadCurrentVersion())) officialStage = UpdateRetrievalStage.Package;
                 }
             }
             catch (OperationCanceledException)
@@ -469,7 +471,7 @@ namespace ChatGPTInstaller
                 else
                 {
                     preparationNotice = "可安装目标已变化或不可用，请重新检查并准备。尚未执行部署。";
-                    if (releaseSelection != null && releaseSelection.Package == null && !releaseSelection.IsCurrent(ReadCurrentVersion())) officialStage = UpdateRetrievalStage.Package;
+                    if (releaseSelection != null && releaseSelection.Package == null && !releaseSelection.IsOfflineCurrent(ReadCurrentVersion())) officialStage = UpdateRetrievalStage.Package;
                 }
             }
             catch (OperationCanceledException)
@@ -506,7 +508,6 @@ namespace ChatGPTInstaller
         private async Task CheckOnly()
         {
             if (busy) return;
-            checkCompleted = false;
             BeginOperation();
             cancellation = new CancellationTokenSource();
             deploying = false;
@@ -519,7 +520,7 @@ namespace ChatGPTInstaller
             UpdateRetrievalStage? officialStage = null;
             try
             {
-                var result = await Task.Run(() => new UpdateChecker(log, progress).Check(proxy, cancellation.Token));
+                var result = await Task.Run(() => new UpdateChecker(log, progress).Check(proxy, cancellation.Token, operationOfficialContext));
                 notes.Text = result.Report;
                 notes.SelectionStart = 0;
                 notes.ScrollToCaret();
@@ -527,7 +528,7 @@ namespace ChatGPTInstaller
                 checkCompleted = result.LocalError == null && result.LatestVersion != null;
                 cacheStatus = result.Cache;
                 releaseSelection = result.Selection;
-                if (result.LocalError == null && result.Selection.Package == null && !result.Selection.IsCurrent(result.InstalledVersion)) officialStage = UpdateRetrievalStage.Package;
+                if (result.LocalError == null && result.Selection.Package == null && !result.Selection.IsOfflineCurrent(result.InstalledVersion)) officialStage = UpdateRetrievalStage.Package;
                 if (result.Selection.CanUpdate(result.InstalledVersion) && cacheStatus != null)
                     ShowStatus(new UiStatus(cacheStatus.Summary, result.Summary, cacheStatus.Size > 0 ? (int)(cacheStatus.Bytes * 100 / cacheStatus.Size) : 0));
                 if (prepared != null && (result.AvailableVersion != prepared.Release.Version ||
@@ -538,7 +539,7 @@ namespace ChatGPTInstaller
                 }
                 if (prepared == null)
                 {
-                    if (result.LocalError == null && result.Selection.IsCurrent(result.InstalledVersion)) finishedMessage = result.Summary;
+                    if (result.LocalError == null && result.Selection.IsOfflineCurrent(result.InstalledVersion) && result.Selection.ExternalUpdateTitle(result.InstalledVersion) == null) finishedMessage = result.Summary;
                     else preparationNotice = result.Summary;
                 }
             }
@@ -805,9 +806,10 @@ namespace ChatGPTInstaller
                 default: throw new InvalidDataException("未知的更新器操作。");
             }
             Version currentVersion = ReadCurrentVersion();
-            bool upToDate = releaseSelection != null && releaseSelection.IsCurrent(currentVersion);
+            string externalTitle = releaseSelection == null ? null : releaseSelection.ExternalUpdateTitle(currentVersion);
+            bool upToDate = externalTitle == null && releaseSelection != null && releaseSelection.IsOfflineCurrent(currentVersion);
             bool canDownload = checkCompleted && releaseSelection != null && releaseSelection.CanUpdate(currentVersion);
-            string state = busy ? checkingOfficial ? "diagnosing" : preparing ? "downloading" : confirming ? "installing" : "checking" : prepared != null ? "ready" : lastFailure != null ? "error" : upToDate ? "current" :
+            string state = busy ? checkingOfficial ? "diagnosing" : preparing ? "downloading" : confirming ? "installing" : "checking" : prepared != null ? "ready" : lastFailure != null ? "error" : externalTitle != null ? "external" : upToDate ? "current" :
                 canDownload ? "available" : checkCompleted ? "unavailable" : "idle";
             return new
             {
@@ -819,6 +821,8 @@ namespace ChatGPTInstaller
                 currentVersion = currentVersionText, latestVersion = latestVersionText,
                 preparedVersion = prepared == null ? null : prepared.Release.Version.ToString(),
                 latestVersionLabel = latestVersionLabel,
+                externalUpdateTitle = externalTitle,
+                newerStoreVersion = releaseSelection != null && releaseSelection.HasNewerStoreVersion(currentVersion) ? releaseSelection.StoreVersion.ToString() : null,
                 availableVersion = releaseSelection == null || releaseSelection.AvailableVersion == null ? null : releaseSelection.AvailableVersion.ToString(),
                 isFallback = releaseSelection != null && releaseSelection.IsFallback,
                 availabilityNotice = releaseSelection == null ? null : releaseSelection.Notice,

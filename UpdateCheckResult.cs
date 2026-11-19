@@ -9,6 +9,22 @@ namespace ChatGPTInstaller
         public ReleaseSelection Selection;
         public Version LatestVersion { get { return Selection == null ? null : Selection.LatestVersion; } }
         public Version AvailableVersion { get { return Selection == null ? null : Selection.AvailableVersion; } }
+        public bool NotesForStore
+        {
+            get
+            {
+                return Selection != null && Selection.HasNewerStoreVersion(InstalledVersion) && (AvailableVersion ?? LatestVersion) <= InstalledVersion;
+            }
+        }
+        public Version NotesTarget { get { return NotesForStore ? Selection.StoreVersion : AvailableVersion ?? LatestVersion; } }
+        public bool NeedsNotes
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(LocalError) || NotesTarget == null) return false;
+                return InstalledVersion == null || ChangelogParser.Batch(NotesTarget) > ChangelogParser.Batch(InstalledVersion);
+            }
+        }
         public string LocalError;
         public string NotesError;
         public bool NotesFetched;
@@ -20,7 +36,7 @@ namespace ChatGPTInstaller
             get
             {
                 if (!string.IsNullOrEmpty(LocalError) || LatestVersion == null || InstalledVersion == null) return null;
-                return LatestVersion > InstalledVersion;
+                return LatestVersion > InstalledVersion || Selection.ExternalUpdateTitle(InstalledVersion) != null;
             }
         }
         public string Summary

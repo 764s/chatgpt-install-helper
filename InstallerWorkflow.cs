@@ -41,7 +41,13 @@ namespace ChatGPTInstaller
             var release = selection.Package;
             if (ShouldSkip(installed, selection.LatestVersion, updateOnly) || (release != null && ShouldSkip(installed, release.Version, updateOnly)))
             {
-                Complete(installed.Version, selection.Summary(installed.Version) + "。");
+                string summary = selection.Summary(installed.Version) + "。";
+                if (selection.ExternalUpdateTitle(installedVersion) != null)
+                {
+                    log.Write(summary);
+                    progress.Report(new UiStatus("暂无可用离线更新", summary, 100));
+                }
+                else Complete(installed.Version, summary);
                 return null;
             }
             if (release == null)
@@ -89,7 +95,7 @@ namespace ChatGPTInstaller
                 Selection = selection
             });
             // 应用等待期间可能已由官方完成更新；先处理无需安装的情况，避免要求重复准备。
-            if (ShouldSkip(installed, prepared.Release.Version, prepared.UpdateOnly) && selection.IsCurrent(installedVersion))
+            if (ShouldSkip(installed, prepared.Release.Version, prepared.UpdateOnly) && selection.IsOfflineCurrent(installedVersion))
             {
                 Complete(installed.Version, selection.Summary(installed.Version) + "。");
                 ClearPreparedFiles(prepared);

@@ -5,6 +5,8 @@ namespace ChatGPTInstaller
     internal sealed class ReleaseSelection
     {
         public Version LatestVersion;
+        public Version StoreVersion;
+        public string CodexStatus;
         public ReleaseInfo Package;
         public bool LatestPackageMissing;
         public string SourceNotice;
@@ -26,7 +28,7 @@ namespace ChatGPTInstaller
             }
         }
 
-        public bool IsCurrent(Version installed)
+        public bool IsOfflineCurrent(Version installed)
         {
             return installed != null && (installed >= LatestVersion || (AvailableVersion != null && installed >= AvailableVersion));
         }
@@ -36,11 +38,27 @@ namespace ChatGPTInstaller
             return AvailableVersion != null && (installed == null || AvailableVersion > installed);
         }
 
+        public bool HasNewerStoreVersion(Version installed)
+        {
+            return installed != null && StoreVersion != null && StoreVersion > installed;
+        }
+
+        public string ExternalUpdateTitle(Version installed)
+        {
+            if (installed == null || CanUpdate(installed)) return null;
+            if (CodexStatus == "restart_required") return "Codex 更新待重启";
+            if (CodexStatus == "available") return "Codex 有可用更新";
+            if (HasNewerStoreVersion(installed)) return "Store 已发布新版";
+            return null;
+        }
+
         public string Summary(Version installed)
         {
+            string external = ExternalUpdateTitle(installed);
+            if (external != null) return external + "，助手暂无更高版本的离线包";
             if (installed != null && installed > LatestVersion) return "本机版本高于本次查到的官方发布版本，无需降级";
-            if (installed == LatestVersion) return VersionLabel == "离线发布最新版" ? "已是官方离线发布最新版" : "已是官方生产渠道最新版";
-            if (IsCurrent(installed)) return "已更新到本次找到的最新可安装版本";
+            if (installed == LatestVersion) return VersionLabel == "离线发布最新版" ? "已是官方离线发布最新版" : "本机版本与 Store 发布标记一致";
+            if (IsOfflineCurrent(installed)) return "已更新到本次找到的最新可安装版本";
             if (Package == null) return installed == null ? "暂未找到独立安装包" : "有新版，未找到独立安装包";
             if (IsFallback) return "较新的独立安装包暂未找到，可更新到 " + Package.Version;
             return installed == null ? "尚未安装新版，可安装 " + Package.Version : "有更新：" + installed + " → " + Package.Version;

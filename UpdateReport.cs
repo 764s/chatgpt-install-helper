@@ -31,26 +31,34 @@ namespace ChatGPTInstaller
             text.AppendLine();
             text.AppendLine("累计更新内容");
             text.AppendLine("────────────────────────────");
-            Version notesTarget = result.AvailableVersion ?? result.LatestVersion;
-            if (result.Selection != null && result.Selection.LatestPackageMissing)
+            Version notesTarget = result.NotesTarget;
+            if (result.NotesForStore)
+                text.AppendLine("以下按 Store 已公布的版本 " + notesTarget + " 核对发布说明，仅供参考。");
+            else if (result.Selection != null && result.Selection.LatestPackageMissing)
                 text.AppendLine(result.AvailableVersion == null ? "以下为官方已发布内容，不代表目前可以安装。" : "累计范围以本次可安装版本为上限，不包含缺包的更高版本。");
-            if (!result.NotesFetched)
+            if (!string.IsNullOrEmpty(result.LocalError) || notesTarget == null)
+            {
+                text.AppendLine("缺少可比较的版本，无法确定累计更新范围。");
+            }
+            else if (result.InstalledVersion != null && result.InstalledVersion >= notesTarget)
+            {
+                text.AppendLine(result.Selection.ExternalUpdateTitle(result.InstalledVersion) != null
+                    ? "本次没有取得高于本机的 Windows 包版本号，无法确定这次更新的说明范围。"
+                    : "本次没有需要安装的离线更新。");
+            }
+            else if (!result.NeedsNotes)
+            {
+                text.AppendLine("本机与目标版本属于同一发布批次，无法从按批次公布的说明中单独列出本次构建的变更。");
+            }
+            else if (!result.NotesFetched)
             {
                 text.AppendLine("版本检查已完成，但更新内容获取失败。不能据此判断没有变更。");
                 text.AppendLine(result.NotesError ?? "未知错误");
-            }
-            else if (!string.IsNullOrEmpty(result.LocalError) || result.LatestVersion == null)
-            {
-                text.AppendLine("缺少可比较的版本，无法确定累计更新范围。");
             }
             else if (result.InstalledVersion == null)
             {
                 text.AppendLine("没有本机版本作为基线。以下列出最近 3 条带版本号的桌面版说明，供安装前参考。");
                 AppendNotes(text, result.Notes.Where(n => n.Versions.Any(v => ChangelogParser.Batch(v) <= ChangelogParser.Batch(notesTarget))).Take(3).ToList());
-            }
-            else if (result.InstalledVersion >= notesTarget)
-            {
-                text.AppendLine("本次比较范围没有高于本机的版本，因此没有待安装的累计更新范围。");
             }
             else
             {

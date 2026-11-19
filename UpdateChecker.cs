@@ -20,7 +20,7 @@ namespace ChatGPTInstaller
             this.readInstalled = readInstalled;
         }
 
-        public UpdateCheckResult Check(string proxy, CancellationToken token)
+        public UpdateCheckResult Check(string proxy, CancellationToken token, OfficialUpdateContext codexContext = null)
         {
             PlatformInfo.Check();
             var result = new UpdateCheckResult();
@@ -42,24 +42,27 @@ namespace ChatGPTInstaller
                 CurrentVersion = result.LocalError != null ? "读取失败" : result.InstalledVersion == null ? "尚未安装新版" : result.InstalledVersion.ToString()
             });
             var resolver = new ReleaseResolver(log, progress);
-            result.Selection = resolver.Resolve(PlatformInfo.Architecture(), proxy, result.InstalledVersion, token);
+            result.Selection = resolver.Resolve(PlatformInfo.Architecture(), proxy, result.InstalledVersion, token, codexContext);
             if (result.Selection.Package != null) result.Cache = PackageCache.Inspect(result.Selection.Package, token);
-            progress.Report(new UiStatus("读取累计更新内容", result.Summary, -1)
+            progress.Report(new UiStatus(result.NeedsNotes ? "读取累计更新内容" : "核对发布批次", result.Summary, -1)
             {
                 Selection = result.Selection, Cache = result.Cache
             });
-            try
+            if (result.NeedsNotes)
             {
-                string html = Encoding.UTF8.GetString(resolver.Client.GetSmall(new Uri(AppInfo.Changelog), 4 * 1024 * 1024, token));
-                result.Notes.AddRange(ChangelogParser.Parse(html));
-                result.NotesFetched = true;
-                log.Write("已读取官方桌面发布说明；按明确标注的版本批次筛选。");
-            }
-            catch (Exception ex)
-            {
-                token.ThrowIfCancellationRequested();
-                result.NotesError = ErrorMessages.Explain(ex);
-                log.Write("更新内容获取失败，版本检查结果仍保留：" + result.NotesError);
+                try
+                {
+                    string html = Encoding.UTF8.GetString(resolver.Client.GetSmall(new Uri(AppInfo.Changelog), 16 * 1024 * 1024, token));
+                    result.Notes.AddRange(ChangelogParser.Parse(html));
+                    result.NotesFetched = true;
+                    log.Write("已读取官方桌面发布说明；按明确标注的版本批次筛选。");
+                }
+                catch (Exception ex)
+                {
+                    token.ThrowIfCancellationRequested();
+                    result.NotesError = ErrorMessages.Explain(ex);
+                    log.Write("更新内容获取失败，版本检查结果仍保留：" + result.NotesError);
+                }
             }
             token.ThrowIfCancellationRequested();
             result.Report = UpdateReport.Format(result);

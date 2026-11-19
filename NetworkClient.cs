@@ -33,6 +33,8 @@ namespace ChatGPTInstaller
             request.KeepAlive = false;
             request.CachePolicy = new RequestCachePolicy(RequestCacheLevel.NoCacheNoStore);
             request.Headers[HttpRequestHeader.CacheControl] = "no-cache";
+            if (uri.AbsoluteUri == AppInfo.Changelog)
+                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             if (start.HasValue)
             {
                 if (end.HasValue) request.AddRange(start.Value, end.Value);
