@@ -64,13 +64,13 @@ namespace ChatGPTInstaller
                     report("正在准备侧栏插件…");
                     WritePlugin(target);
                     report("正在注册本地插件来源…");
-                    client.Run("plugin", "marketplace", "add", Paths.Sidebar, "--json");
+                    client.Run("注册本地插件来源", "plugin", "marketplace", "add", Paths.Sidebar, "--json");
                     string installedPath;
                     // 手动添加 / 修复保留原有的重新安装并启用语义；自动升级只刷新缓存。
                     if (previous == null || force)
                     {
                         report("正在安装并启用侧栏插件…");
-                        var installed = JsonData.Parse(client.Run("plugin", "add", Selector, "--json"));
+                        var installed = JsonData.Parse(client.Run("安装侧栏插件", "plugin", "add", Selector, "--json"));
                         installedPath = JsonData.Get(installed, "installedPath") as string;
                         if (JsonData.Get(installed, "pluginId") as string != Selector)
                             throw new InvalidDataException("Codex 未返回此插件的安装确认，请稍后重新添加 / 修复入口。");
@@ -84,6 +84,8 @@ namespace ChatGPTInstaller
                     var confirmed = client.GetInstalledPlugin();
                     if (confirmed == null || confirmed.Version != targetVersion || !HasSavedCommand(installedPath))
                         throw new InvalidDataException("未能核对插件版本与启动目标，本次配置尚未确认完成。可稍后重试添加 / 修复入口。");
+                    if ((previous == null || force) && !confirmed.Enabled)
+                        throw new InvalidDataException("侧栏插件已安装，但 Codex 报告它处于停用状态。请在 Codex 插件中检查启用开关。");
                     if (previous != null && !force && confirmed.Enabled != previous.Enabled)
                         throw new InvalidDataException("插件启用状态在配置期间发生变化，请核对 Codex 中的开关；本工具未修改该开关。");
                     // 手动修复也保存启动目标；自动启动已先保存副本，与插件是否安装无关。
@@ -111,9 +113,9 @@ namespace ChatGPTInstaller
                     var client = new CodexPluginClient();
                     bool hasMarketplace = client.HasOwnedMarketplace();
                     report("正在移除侧栏插件…");
-                    client.Run("plugin", "remove", Selector, "--json");
+                    client.Run("移除侧栏插件", "plugin", "remove", Selector, "--json");
                     report("正在移除本工具的插件来源…");
-                    if (hasMarketplace) client.Run("plugin", "marketplace", "remove", MarketplaceName, "--json");
+                    if (hasMarketplace) client.Run("移除本地插件来源", "plugin", "marketplace", "remove", MarketplaceName, "--json");
                     if (File.Exists(Receipt)) File.Delete(Receipt);
                     report("侧栏入口已移除，重新打开 ChatGPT 后生效。安装助手和已下载的安装包已保留。");
                 }

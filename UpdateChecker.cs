@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Text;
 using System.Threading;
 
@@ -44,6 +45,8 @@ namespace ChatGPTInstaller
             var resolver = new ReleaseResolver(log, progress);
             result.Selection = resolver.Resolve(PlatformInfo.Architecture(), proxy, result.InstalledVersion, token, codexContext);
             if (result.Selection.Package != null) result.Cache = PackageCache.Inspect(result.Selection.Package, token);
+            if (result.LocalError == null && result.Selection.CanFollowOfficial(result.InstalledVersion, result.Cache, true))
+                result.OfficialTransferBytes = OfficialDownload.ReadBytes();
             progress.Report(new UiStatus(result.NeedsNotes ? "读取累计更新内容" : "核对发布批次", result.Summary, -1)
             {
                 Selection = result.Selection, Cache = result.Cache
@@ -52,6 +55,7 @@ namespace ChatGPTInstaller
             {
                 try
                 {
+                    if (resolver.Client == null) throw new IOException("本次仅取得本机官方更新任务，发布说明连接暂不可用。");
                     string html = Encoding.UTF8.GetString(resolver.Client.GetSmall(new Uri(AppInfo.Changelog), 16 * 1024 * 1024, token));
                     result.Notes.AddRange(ChangelogParser.Parse(html));
                     result.NotesFetched = true;

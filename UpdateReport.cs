@@ -14,7 +14,7 @@ namespace ChatGPTInstaller
             text.AppendLine("检查时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             text.AppendLine("本机安装包：" + (result.InstalledVersion == null ? "未检测到" : result.InstalledVersion.ToString()));
             text.AppendLine((result.Selection == null ? "官方最新版" : result.Selection.VersionLabel) + "：" + (result.LatestVersion == null ? "未能确认" : result.LatestVersion.ToString()));
-            text.AppendLine("本次可安装版本：" + (result.AvailableVersion == null ? "未选择安装包" : result.AvailableVersion.ToString()));
+            text.AppendLine("本次可安装版本：" + (result.AvailableVersion != null ? result.AvailableVersion.ToString() : result.Selection != null && result.Selection.UsesWindows ? "已取得本机适用的更新，尚无独立包号" : "未选择安装包"));
             if (result.Selection != null && !string.IsNullOrEmpty(result.Selection.Notice))
             {
                 text.AppendLine(result.Selection.Notice);
@@ -26,8 +26,11 @@ namespace ChatGPTInstaller
             text.AppendLine("版本来源：官方离线发布清单与 Store 发布标记独立读取；仅在已读取的来源范围内比较最新版。");
             text.AppendLine(AppInfo.ReleaseFeed);
             text.AppendLine(AppInfo.UpdateManifest);
-            text.AppendLine("官方客户端可以通过 Microsoft Store 下载更新；Store 蓝点及其系统缓存不等于公开的独立 MSIX 包。");
-            text.AppendLine(result.AvailableVersion == null ? "本次没有可下载的安装目标。" : "已核对本次所选版本的安装包可访问。应用内的待安装或重启状态仍需由应用完成更新后刷新。");
+            if (result.Selection != null && result.Selection.UsesWindows)
+                text.AppendLine("安装来源：当前用户的官方 ChatGPT 更新任务。下载和应用均使用核对过的同一更新标识。");
+            else if (result.Selection != null && result.Selection.Package != null && result.Selection.Package.CacheOnly)
+                text.AppendLine("安装来源：本机已核验的 Codex 完整包。");
+            else text.AppendLine(result.AvailableVersion == null ? "本次没有可下载的安装目标。" : "已核对本次所选版本的安装包可访问。应用内的待安装或重启状态仍需由应用完成更新后刷新。");
             text.AppendLine();
             text.AppendLine("累计更新内容");
             text.AppendLine("────────────────────────────");

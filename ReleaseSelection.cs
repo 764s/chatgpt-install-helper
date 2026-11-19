@@ -7,12 +7,15 @@ namespace ChatGPTInstaller
         public Version LatestVersion;
         public Version StoreVersion;
         public string CodexStatus;
+        public string StoreIssue;
         public ReleaseInfo Package;
         public bool LatestPackageMissing;
         public string SourceNotice;
         public string VersionLabel = "官方最新版";
 
         public Version AvailableVersion { get { return Package == null ? null : Package.Version; } }
+        public bool UsesWindows { get { return Package != null && Package.WindowsOffer != null; } }
+        public Version HighestPublishedVersion { get { return StoreVersion != null && StoreVersion > LatestVersion ? StoreVersion : LatestVersion; } }
         public bool IsFallback { get { return AvailableVersion != null && AvailableVersion < LatestVersion; } }
         public string CandidateNotice
         {
@@ -30,12 +33,20 @@ namespace ChatGPTInstaller
 
         public bool IsOfflineCurrent(Version installed)
         {
-            return installed != null && (installed >= LatestVersion || (AvailableVersion != null && installed >= AvailableVersion));
+            return !UsesWindows && installed != null && ((LatestVersion != null && installed >= LatestVersion) || (AvailableVersion != null && installed >= AvailableVersion));
         }
 
         public bool CanUpdate(Version installed)
         {
+            if (UsesWindows) return installed == Package.WindowsOffer.Baseline && (AvailableVersion == null || AvailableVersion > installed);
             return AvailableVersion != null && (installed == null || AvailableVersion > installed);
+        }
+
+        public bool CanFollowOfficial(Version installed, PackageCacheInfo cache, bool updateOnly)
+        {
+            Version target = HighestPublishedVersion;
+            if (UsesWindows || target == null || (installed != null && (installed > target || (updateOnly && installed == target)))) return false;
+            return AvailableVersion != target || cache == null || !cache.Complete;
         }
 
         public bool HasNewerStoreVersion(Version installed)
@@ -54,8 +65,9 @@ namespace ChatGPTInstaller
 
         public string Summary(Version installed)
         {
+            if (UsesWindows) return Package.WindowsOffer.Downloaded ? "官方更新已下载，可以应用" : "有可下载的官方更新";
             string external = ExternalUpdateTitle(installed);
-            if (external != null) return external + "，助手暂无更高版本的离线包";
+            if (external != null) return external + "。" + (StoreIssue ?? "当前未取得可执行的更新任务");
             if (installed != null && installed > LatestVersion) return "本机版本高于本次查到的官方发布版本，无需降级";
             if (installed == LatestVersion) return VersionLabel == "离线发布最新版" ? "已是官方离线发布最新版" : "本机版本与 Store 发布标记一致";
             if (IsOfflineCurrent(installed)) return "已更新到本次找到的最新可安装版本";

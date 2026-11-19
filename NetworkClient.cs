@@ -124,6 +124,8 @@ namespace ChatGPTInstaller
                     throw new InvalidDataException("官方安装包的处理器架构不匹配。");
                 if (release.Size < 1024 || release.Size > 16L * 1024 * 1024 * 1024)
                     throw new InvalidDataException("无法确认官方安装包大小。");
+                if (release.DeclaredLength.HasValue && release.Size != release.DeclaredLength.Value)
+                    throw new InvalidDataException("服务器包长度与官方清单不一致。");
             }
         }
 
@@ -182,6 +184,14 @@ namespace ChatGPTInstaller
             string part = PackageCache.PackagePath(release);
             string meta = part + ".identity";
             string identity = PackageCache.Identity(release);
+            if (release.CacheOnly)
+            {
+                if (cache.Complete && cache.Source == "helper") return part;
+                if (!PackageCache.TryReuse(release, part, token, progress, log))
+                    throw new IOException("已公布版本的 Codex 缓存已变化，未取得可用的完整包。请重新检查。");
+                File.WriteAllText(meta, identity, Encoding.UTF8);
+                return part;
+            }
             string previousIdentity = File.Exists(meta) ? File.ReadAllText(meta) : null;
             if (string.IsNullOrEmpty(release.ETag) || previousIdentity != identity ||
                 (File.Exists(part) && new FileInfo(part).Length > release.Size))

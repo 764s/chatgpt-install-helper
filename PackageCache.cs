@@ -22,20 +22,66 @@ namespace ChatGPTInstaller
 
         public static string Identity(ReleaseInfo release)
         {
-            return release.PackageUrl.AbsoluteUri + "\n" + release.ETag + "\n" + release.Size;
+            string id = release.CacheOnly ? "codex-prepared-v1\n" + AppInfo.FamilyName + "\n" + release.Architecture + "\n" + release.Version + "\n" + release.Size :
+                release.PackageUrl.AbsoluteUri + "\n" + release.ETag + "\n" + release.Size;
+            return release.Sha256 == null ? id : id + "\nsha256:" + release.Sha256.ToLowerInvariant();
+        }
+
+        // 只有已由官方公布的目标才能从缓存补齐。即使 Codex 删除原路径，也可复核助手已导入的完整副本。
+        public static ReleaseInfo FindPublishedFile(Version version, string architecture, CancellationToken token, RunLog log, ReleaseInfo published)
+        {
+            var release = new ReleaseInfo { CacheOnly = true, Version = version, Architecture = architecture, LicenseUrl = new Uri(AppInfo.DownloadRoot + "ChatGPT-License.xml"),
+                DeclaredLength = published == null ? null : published.DeclaredLength, Sha256 = published == null ? null : published.Sha256 };
+            string own = PackagePath(release);
+            foreach (string path in new[] { own, Paths.OfficialPackage })
+            {
+                token.ThrowIfCancellationRequested();
+                try
+                {
+                    var file = new FileInfo(path);
+                    if (!file.Exists || file.Length < 1024 || file.Length > 16L * 1024 * 1024 * 1024) continue;
+                    release.Size = file.Length;
+                    if (path == own)
+                    {
+                        var metadata = new FileInfo(path + ".identity");
+                        if (!metadata.Exists || metadata.Length > 4096 || File.ReadAllText(metadata.FullName) != Identity(release)) continue;
+                    }
+                    using (var guard = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+                    {
+                        if (guard.Length != release.Size || PackageInfo.Read(path, architecture).Version != version) continue;
+                        release.VerifyDeclaredContent(path, token);
+                        SignatureVerifier.Verify(path);
+                    }
+                    token.ThrowIfCancellationRequested();
+                    return release;
+                }
+                catch (Exception ex)
+                {
+                    if (!IsCacheReadError(ex)) throw;
+                    log.Write("暂不能将 Codex 完整包认定为本次安装目标：" + ex.Message);
+                }
+            }
+            return null;
         }
 
         public static PackageCacheInfo Inspect(ReleaseInfo release, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
             var result = new PackageCacheInfo { Version = release.Version, Size = release.Size };
+            if (release.WindowsOffer != null)
+            {
+                result.Source = "windows";
+                result.State = release.WindowsOffer.Downloaded ? "complete" : "none";
+                if (release.WindowsOffer.Downloaded) result.Bytes = release.Size;
+                return result;
+            }
             string own = PackagePath(release);
             try
             {
-                if (!string.IsNullOrEmpty(release.ETag) && File.Exists(own) && File.Exists(own + ".identity") && File.ReadAllText(own + ".identity") == Identity(release))
+                if ((release.CacheOnly || !string.IsNullOrEmpty(release.ETag)) && File.Exists(own) && File.Exists(own + ".identity") && File.ReadAllText(own + ".identity") == Identity(release))
                 {
                     long size = new FileInfo(own).Length;
-                    if (size > 0 && size <= release.Size)
+                    if (size > 0 && size <= release.Size && (!release.CacheOnly || size == release.Size))
                     {
                         result.State = size == release.Size ? "complete" : "partial";
                         result.Source = "helper";
@@ -83,7 +129,7 @@ namespace ChatGPTInstaller
             string source = Paths.OfficialPackage;
             if (!File.Exists(source))
             {
-                log.Write("官方暂无可复用的完整安装包；未完成的下载不参与复用。");
+                log.Write("Codex 的完整安装包目前不可用。");
                 return false;
             }
             string temporary = null;
@@ -96,12 +142,12 @@ namespace ChatGPTInstaller
                     var info = PackageInfo.Read(source, release.Architecture);
                     if (info.Version != release.Version)
                     {
-                        log.Write("官方缓存版本 " + info.Version + " 与实时目标 " + release.Version + " 不同，跳过缓存，继续获取目标版本。");
+                        log.Write("官方缓存版本 " + info.Version + " 与实时目标 " + release.Version + " 不同，跳过此缓存。");
                         return false;
                     }
                     if (input.Length != release.Size)
                     {
-                        log.Write("官方缓存长度与目标安装包不符，跳过缓存，继续下载。");
+                        log.Write("官方缓存长度与目标安装包不符，跳过此缓存。");
                         return false;
                     }
                     token.ThrowIfCancellationRequested();
@@ -120,6 +166,7 @@ namespace ChatGPTInstaller
                         if (guard.Length != release.Size) throw new InvalidDataException("官方缓存长度在复用期间发生变化。");
                         info = PackageInfo.Read(temporary, release.Architecture);
                         release.RequireVersion(info.Version, "官方缓存");
+                        release.VerifyDeclaredContent(temporary, token);
                         SignatureVerifier.Verify(temporary);
                         token.ThrowIfCancellationRequested();
                     }
@@ -136,7 +183,8 @@ namespace ChatGPTInstaller
             {
                 token.ThrowIfCancellationRequested();
                 if (!IsCacheReadError(ex)) throw;
-                log.Write("未能复用官方缓存：" + ex.Message + " 将继续下载实时目标版本。");
+                log.Write("未能复用官方缓存：" + ex.Message);
+                if (release.CacheOnly) throw new IOException("未能复用 Codex 完整包：" + ex.Message, ex);
                 return false;
             }
             finally

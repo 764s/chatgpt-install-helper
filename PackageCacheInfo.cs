@@ -15,6 +15,7 @@ namespace ChatGPTInstaller
         {
             get
             {
+                if (Source == "windows") return Complete ? "官方更新已下载" : "官方更新可下载";
                 if (Complete) return "已下载，待校验 · " + (Source == "official" ? "官方缓存" : "更新器缓存");
                 if (State == "partial") return "下载未完成 · " + NetworkClient.FormatBytes(Bytes) + " / " + NetworkClient.FormatBytes(Size);
                 return "未下载";

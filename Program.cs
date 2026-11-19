@@ -3,6 +3,7 @@ using System.Net;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ChatGPTInstaller
@@ -12,6 +13,11 @@ namespace ChatGPTInstaller
         [STAThread]
         private static int Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "--windows-update")
+            {
+                try { return Task.Run(() => WindowsUpdatePermission.Execute(args)).GetAwaiter().GetResult(); }
+                catch (Exception) { return 2; }
+            }
             if (args.Length == 1 && args[0] == "--mcp") return SidebarMcpServer.Run();
             if (args.Length == 1 && (args[0] == "--sidebar-install" || args[0] == "--sidebar-remove"))
             {

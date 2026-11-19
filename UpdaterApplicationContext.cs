@@ -17,7 +17,7 @@ namespace ChatGPTInstaller
             IntPtr handle = form.Handle;
             server = new LocalUpdateServer(form);
             idleTimer = new Timer { Interval = 15000 };
-            idleTimer.Tick += delegate { if (form.CanExitBackground()) form.ExitBackground(); };
+            idleTimer.Tick += delegate { if (form.CanExitBackground()) form.ExitBackground(); else form.RefreshIdleTransfer(); };
             idleTimer.Start();
             if (!background) WindowActivation.Show(form);
         }

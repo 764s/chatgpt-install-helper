@@ -26,12 +26,12 @@ namespace ChatGPTInstaller
 
         public bool IsAvailable { get { return executable != null; } }
 
-        public string Run(params string[] arguments)
+        public string Run(string operation, params string[] arguments)
         {
-            return Run(60000, arguments);
+            return Run(60000, operation, arguments);
         }
 
-        private string Run(int timeout, params string[] arguments)
+        private string Run(int timeout, string operation, params string[] arguments)
         {
             if (!IsAvailable) throw new FileNotFoundException("未找到 ChatGPT 随附的 Codex 组件。请先安装并打开一次新版 ChatGPT，再添加侧栏入口。");
             var start = new ProcessStartInfo(executable, string.Join(" ", arguments.Select(Quote)))
@@ -53,20 +53,20 @@ namespace ChatGPTInstaller
                 {
                     // 只结束本次插件命令，不影响正在执行任务的 Codex 进程。
                     try { process.Kill(); } catch (InvalidOperationException) { }
-                    throw new TimeoutException("Codex 插件配置等待超时。可稍后重试添加 / 修复入口。");
+                    throw new TimeoutException(operation + "超时（" + timeout / 1000 + " 秒）。可稍后重试。");
                 }
                 string stdout = output.GetAwaiter().GetResult();
                 string stderr = error.GetAwaiter().GetResult();
                 if (process.ExitCode != 0)
-                    throw new InvalidOperationException("Codex 插件命令未完成：" + (string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim());
+                    throw new InvalidOperationException(operation + "失败：" + (string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim());
                 return stdout;
             }
         }
 
         public bool HasOwnedMarketplace()
         {
-            var result = JsonData.Parse(Run(5000, "plugin", "marketplace", "list", "--json"));
-            var marketplaces = JsonData.Get(result, "marketplaces") as IEnumerable;
+            var result = JsonData.Parse(Run(5000, "查询 Codex 插件来源", "plugin", "marketplace", "list", "--json"));
+            var marketplaces = JsonData.Get(result, "marketplaces") as IList;
             if (marketplaces == null) throw new InvalidDataException("Codex 返回的插件来源格式已变化，请更新安装助手。");
             foreach (var value in marketplaces)
             {
@@ -84,21 +84,25 @@ namespace ChatGPTInstaller
 
         public InstalledSidebarPlugin GetInstalledPlugin()
         {
-            // 一次只读查询确认真实安装状态；不依赖可能过期的完成记录，也不要求来源仍已注册。
-            var result = JsonData.Parse(Run(5000, "plugin", "list", "--json"));
-            var installed = JsonData.Get(result, "installed") as IEnumerable;
+            // 指定本地市场后，CLI 会跳过远程目录请求。空数组才表示该市场没有已安装条目。
+            var result = JsonData.Parse(Run(5000, "查询更新器的本地插件状态", "plugin", "list", "--marketplace", SidebarIntegration.MarketplaceName, "--json"));
+            var installed = JsonData.Get(result, "installed") as IList;
             if (installed == null) throw new InvalidDataException("Codex 返回的插件安装状态格式已变化，请更新安装助手。");
+            InstalledSidebarPlugin found = null;
             foreach (var value in installed)
             {
                 var plugin = value as Dictionary<string, object>;
-                if (JsonData.Get(plugin, "pluginId") as string != SidebarIntegration.Selector || !object.Equals(JsonData.Get(plugin, "installed"), true)) continue;
+                string id = JsonData.Get(plugin, "pluginId") as string;
+                if (string.IsNullOrWhiteSpace(id)) throw new InvalidDataException("Codex 返回的已安装插件缺少标识，无法确认侧栏状态。");
+                if (id != SidebarIntegration.Selector) continue;
                 Version version;
                 object enabled = JsonData.Get(plugin, "enabled");
-                if (!Version.TryParse(JsonData.Get(plugin, "version") as string, out version) || !(enabled is bool))
-                    throw new InvalidDataException("无法确认已有插件的版本或启用状态，本次未覆盖插件。可稍后重试。");
-                return new InstalledSidebarPlugin(version, (bool)enabled);
+                if (found != null || !object.Equals(JsonData.Get(plugin, "installed"), true) ||
+                    !Version.TryParse(JsonData.Get(plugin, "version") as string, out version) || !(enabled is bool))
+                    throw new InvalidDataException("无法确认已有插件的安装状态、版本或启用开关，请检查 Codex 插件配置。");
+                found = new InstalledSidebarPlugin(version, (bool)enabled);
             }
-            return null;
+            return found;
         }
 
         public void RefreshInstalledPlugin(Version targetVersion, Func<bool> cacheReady)

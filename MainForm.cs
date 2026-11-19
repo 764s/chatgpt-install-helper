@@ -45,6 +45,8 @@ namespace ChatGPTInstaller
         private bool closeAfterStartup;
         private PreparedInstallation prepared;
         private PackageCacheInfo cacheStatus;
+        private bool observedOfficialTransfer;
+        private bool offerFollow;
         private ReleaseSelection releaseSelection;
         private OfficialUpdateContext officialContext;
         private OfficialUpdateContext operationOfficialContext;
@@ -61,6 +63,7 @@ namespace ChatGPTInstaller
         private bool exitBackground;
         private bool autoInstallSelected;
         private bool restartAfterUpdate;
+        private bool appliedUpdate;
         private bool checkCompleted;
         private DateTime lastSidebarRequest = DateTime.UtcNow;
         private string currentVersionText;
@@ -191,6 +194,7 @@ namespace ChatGPTInstaller
             commit.Click += async delegate
             {
                 if (prepared != null) await InstallPrepared();
+                else if (!busy && offerFollow) await Start(true);
                 else if (!busy && finishedMessage != null && installedAvailable) OpenChatGPT();
                 else if (!busy && cacheStatus != null) await Start(true);
             };
@@ -351,9 +355,11 @@ namespace ChatGPTInstaller
             finishedMessage = null;
             preparationNotice = null;
             retryPrepared = false;
+            appliedUpdate = false;
             lastFailure = null;
             checkCompleted = false;
             releaseSelection = null;
+            observedOfficialTransfer = false;
             cacheStatus = null;
             officialResult = null;
             officialNotice.Visible = false;
@@ -372,6 +378,8 @@ namespace ChatGPTInstaller
         private async Task Start(bool updateOnly, bool autoInstall = false, bool fromSidebar = false)
         {
             if (busy) return;
+            long? officialBytes;
+            bool followObserved = ObserveOfficialTransfer(ReadCurrentVersion(), out officialBytes);
             autoInstallSelected = fromSidebar && autoInstall;
             restartAfterUpdate = fromSidebar;
             BeginOperation();
@@ -387,7 +395,7 @@ namespace ChatGPTInstaller
             UpdateRetrievalStage? officialStage = null;
             try
             {
-                prepared = await Task.Run(() => new InstallerWorkflow(log, progress).Prepare(updateOnly, proxy, cancellation.Token));
+                prepared = await Task.Run(() => new InstallerWorkflow(log, progress).Prepare(updateOnly, proxy, cancellation.Token, followObserved));
                 if (prepared == null && finishedMessage == null && releaseSelection != null)
                 {
                     preparationNotice = lastStatus.Detail;
@@ -435,6 +443,7 @@ namespace ChatGPTInstaller
         {
             if (busy || prepared == null) return;
             var selection = prepared;
+            if (selection.Release.WindowsOffer != null) restartAfterUpdate = true;
             BeginOperation();
             cancellation = new CancellationTokenSource();
             deploying = false;
@@ -452,6 +461,7 @@ namespace ChatGPTInstaller
                 if (complete)
                 {
                     installedAvailable = true;
+                    appliedUpdate = true;
                     if (restartAfterUpdate)
                     {
                         try
@@ -484,7 +494,7 @@ namespace ChatGPTInstaller
             {
                 var retrieval = ex as UpdateRetrievalException;
                 if (retrieval != null) officialStage = retrieval.Stage;
-                if (ex is InvalidDataException || (retrieval != null && retrieval.InvalidatesPackage) || !selection.FilesExist()) prepared = null;
+                if (ex is InvalidDataException || (retrieval != null && retrieval.InvalidatesPackage) || !selection.HasPreparedInput()) prepared = null;
                 string message = ErrorMessages.Explain(ex);
                 lastFailure = message;
                 preparationNotice = message;
@@ -525,21 +535,20 @@ namespace ChatGPTInstaller
                 notes.SelectionStart = 0;
                 notes.ScrollToCaret();
                 installedAvailable = result.InstalledVersion != null;
-                checkCompleted = result.LocalError == null && result.LatestVersion != null;
+                checkCompleted = result.LocalError == null && (result.LatestVersion != null || result.Selection.UsesWindows);
                 cacheStatus = result.Cache;
                 releaseSelection = result.Selection;
-                if (result.LocalError == null && result.Selection.Package == null && !result.Selection.IsOfflineCurrent(result.InstalledVersion)) officialStage = UpdateRetrievalStage.Package;
+                observedOfficialTransfer = result.OfficialTransferBytes.HasValue;
+                if (!observedOfficialTransfer && result.LocalError == null && result.Selection.Package == null && !result.Selection.IsOfflineCurrent(result.InstalledVersion)) officialStage = UpdateRetrievalStage.Package;
                 if (result.Selection.CanUpdate(result.InstalledVersion) && cacheStatus != null)
                     ShowStatus(new UiStatus(cacheStatus.Summary, result.Summary, cacheStatus.Size > 0 ? (int)(cacheStatus.Bytes * 100 / cacheStatus.Size) : 0));
-                if (prepared != null && (result.AvailableVersion != prepared.Release.Version ||
-                    (result.InstalledVersion != null && InstallerWorkflow.ShouldSkip(new InstalledPackage { Version = result.InstalledVersion }, prepared.Release.Version, prepared.UpdateOnly))))
-                {
-                    prepared = null;
+                var prior = prepared;
+                prepared = result.ReconcilePrepared(prior);
+                if (prior != null && prepared == null)
                     log.Write("版本状态已变化，已取消原准备状态；如仍需安装，请点击上方安装 / 更新重新准备。");
-                }
                 if (prepared == null)
                 {
-                    if (result.LocalError == null && result.Selection.IsOfflineCurrent(result.InstalledVersion) && result.Selection.ExternalUpdateTitle(result.InstalledVersion) == null) finishedMessage = result.Summary;
+                    if (!observedOfficialTransfer && result.LocalError == null && result.Selection.IsOfflineCurrent(result.InstalledVersion) && result.Selection.ExternalUpdateTitle(result.InstalledVersion) == null) finishedMessage = result.Summary;
                     else preparationNotice = result.Summary;
                 }
             }
@@ -650,7 +659,7 @@ namespace ChatGPTInstaller
             if (status.Selection != null)
             {
                 releaseSelection = status.Selection;
-                latestVersionText = releaseSelection.LatestVersion.ToString();
+                latestVersionText = releaseSelection.LatestVersion == null ? "未提供包号" : releaseSelection.LatestVersion.ToString();
                 latestVersionLabel = releaseSelection.VersionLabel;
                 latest.Text = latestVersionLabel + "\n" + latestVersionText;
                 if (releaseSelection.IsFallback) latest.Text += "\n可安装：" + releaseSelection.AvailableVersion;
@@ -686,16 +695,34 @@ namespace ChatGPTInstaller
             RefreshPreparedControls();
         }
 
+        private bool ObserveOfficialTransfer(Version currentVersion, out long? bytes)
+        {
+            bytes = null;
+            if (busy || prepared != null || !checkCompleted || releaseSelection == null ||
+                !releaseSelection.CanFollowOfficial(currentVersion, cacheStatus, true)) return false;
+            bytes = OfficialDownload.ReadBytes();
+            if (bytes.HasValue) observedOfficialTransfer = true;
+            return bytes.HasValue || (observedOfficialTransfer && File.Exists(Paths.OfficialPackage));
+        }
+
+        internal void RefreshIdleTransfer()
+        {
+            if (Visible && !busy && prepared == null && checkCompleted) RefreshPreparedControls();
+        }
+
         private void RefreshPreparedControls()
         {
             launch.Enabled = installedAvailable && !confirming && !deploying;
+            Version installed = ReadCurrentVersion();
+            long? officialBytes;
+            offerFollow = ObserveOfficialTransfer(installed, out officialBytes);
             bool ready = prepared != null && !busy;
-            bool finished = prepared == null && finishedMessage != null && !busy;
+            bool finished = prepared == null && finishedMessage != null && !busy && !offerFollow;
             bool canOpen = finished && installedAvailable;
             bool canPrepare = !busy && prepared == null && !finished && cacheStatus != null && lastFailure == null &&
                 checkCompleted && releaseSelection != null && releaseSelection.CanUpdate(ReadCurrentVersion());
             launch.Visible = !canOpen;
-            commit.SetRunningState(!ready && !canOpen && !canPrepare, confirming);
+            commit.SetRunningState(!ready && !canOpen && !canPrepare && !offerFollow, confirming);
             preparedRow.BackColor = Color.White;
             preparation.ForeColor = Color.FromArgb(65, 85, 77);
             cacheNotice.Text = !finished && cacheStatus != null ? cacheStatus.Notice ?? "" : "";
@@ -721,8 +748,8 @@ namespace ChatGPTInstaller
             }
             else if (prepared != null)
             {
-                commit.Text = retryPrepared ? (prepared.UpdateOnly ? "重试更新" : "重试安装") : prepared.UpdateOnly ? "立即更新" : "立即安装 / 重装";
-                preparation.Text = preparationNotice ?? "已准备 " + prepared.Release.Version + "，可继续运行任务。\n" +
+                commit.Text = prepared.Release.WindowsOffer != null ? "应用更新并重启" : retryPrepared ? (prepared.UpdateOnly ? "重试更新" : "重试安装") : prepared.UpdateOnly ? "立即更新" : "立即安装 / 重装";
+                preparation.Text = preparationNotice ?? "已准备 " + (prepared.Release.Version == null ? "本机官方更新" : prepared.Release.Version.ToString()) + "，可继续运行任务。\n" +
                     (releaseSelection != null && releaseSelection.IsFallback ? "官方最新版暂缺安装包；" : "") + "任务结束并保存后，点击右侧按钮安装。";
                 preparedRow.BackColor = preparationNotice == null ? Color.FromArgb(236, 247, 241) : Color.FromArgb(255, 246, 228);
             }
@@ -730,6 +757,11 @@ namespace ChatGPTInstaller
             {
                 commit.Text = "正在检查…";
                 preparation.Text = "正在读取版本状态。\n此阶段不会关闭或修改 ChatGPT / Codex。";
+            }
+            else if (offerFollow)
+            {
+                commit.Text = officialBytes.HasValue ? "跟随 Codex 下载" : "校验 Codex 下载";
+                preparation.Text = officialBytes.HasValue ? "Codex 临时包已写入 " + NetworkClient.FormatBytes(officialBytes.Value) + "，完成后可核验复用。" : "检查 Codex 刚刚下载的完整包。";
             }
             else if (finished)
             {
@@ -754,7 +786,7 @@ namespace ChatGPTInstaller
                 commit.Text = "先选择操作";
                 preparation.Text = "点击上方安装 / 更新，先下载并校验。\n准备好后由你决定安装时机。";
             }
-            if (ready || canOpen || canPrepare)
+            if (ready || canOpen || canPrepare || offerFollow)
             {
                 commit.BackColor = Color.FromArgb(21, 111, 87);
                 commit.ForeColor = Color.White;
@@ -807,9 +839,11 @@ namespace ChatGPTInstaller
             }
             Version currentVersion = ReadCurrentVersion();
             string externalTitle = releaseSelection == null ? null : releaseSelection.ExternalUpdateTitle(currentVersion);
-            bool upToDate = externalTitle == null && releaseSelection != null && releaseSelection.IsOfflineCurrent(currentVersion);
+            long? officialBytes;
+            bool canFollow = ObserveOfficialTransfer(currentVersion, out officialBytes);
+            bool upToDate = appliedUpdate || (!canFollow && externalTitle == null && releaseSelection != null && releaseSelection.IsOfflineCurrent(currentVersion));
             bool canDownload = checkCompleted && releaseSelection != null && releaseSelection.CanUpdate(currentVersion);
-            string state = busy ? checkingOfficial ? "diagnosing" : preparing ? "downloading" : confirming ? "installing" : "checking" : prepared != null ? "ready" : lastFailure != null ? "error" : externalTitle != null ? "external" : upToDate ? "current" :
+            string state = busy ? checkingOfficial ? "diagnosing" : preparing ? "downloading" : confirming ? "installing" : "checking" : prepared != null ? "ready" : lastFailure != null ? "error" : appliedUpdate ? "updated" : canFollow ? "officialTransfer" : externalTitle != null ? "external" : upToDate ? "current" :
                 canDownload ? "available" : checkCompleted ? "unavailable" : "idle";
             return new
             {
@@ -819,7 +853,10 @@ namespace ChatGPTInstaller
                 diagnosticMessage = checkingOfficial ? "本次获取失败，正在只读核对 Codex 自带更新器…" : officialResult == null ? null : officialResult.Message,
                 diagnosticSuggestRepair = officialResult != null && officialResult.SuggestRepair,
                 currentVersion = currentVersionText, latestVersion = latestVersionText,
-                preparedVersion = prepared == null ? null : prepared.Release.Version.ToString(),
+                preparedVersion = prepared == null || prepared.Release.Version == null ? null : prepared.Release.Version.ToString(),
+                currentUserUpdateSupported = true,
+                systemUpdate = (prepared != null && prepared.Release.WindowsOffer != null) || (releaseSelection != null && releaseSelection.UsesWindows),
+                storeIssue = releaseSelection == null ? null : releaseSelection.StoreIssue,
                 latestVersionLabel = latestVersionLabel,
                 externalUpdateTitle = externalTitle,
                 newerStoreVersion = releaseSelection != null && releaseSelection.HasNewerStoreVersion(currentVersion) ? releaseSelection.StoreVersion.ToString() : null,
@@ -828,13 +865,15 @@ namespace ChatGPTInstaller
                 availabilityNotice = releaseSelection == null ? null : releaseSelection.Notice,
                 candidateNotice = releaseSelection == null ? null : releaseSelection.CandidateNotice,
                 canDownload = canDownload,
+                canFollowOfficial = canFollow,
+                officialTransferSize = officialBytes.HasValue ? NetworkClient.FormatBytes(officialBytes.Value) : null,
                 phase = checkingOfficial ? "核对官方更新方式" : lastStatus.Phase,
                 detail = checkingOfficial ? "只读取官方状态，不下载、安装或重启。" : lastFailure ?? lastStatus.Detail,
                 percent = checkingOfficial ? -1 : lastStatus.Percent,
                 ready = prepared != null && !busy, upToDate = upToDate, checkedVersion = checkCompleted,
                 autoInstall = autoInstallSelected, canCancel = cancellation != null && !deploying && !cancellation.IsCancellationRequested,
                 cacheState = cacheStatus == null ? "unknown" : cacheStatus.State,
-                cacheSummary = cacheStatus == null ? null : cacheStatus.Summary,
+                cacheSummary = canFollow ? (officialBytes.HasValue ? "Codex 临时包 · " + NetworkClient.FormatBytes(officialBytes.Value) : "Codex 下载待核验") : cacheStatus == null ? null : cacheStatus.Summary,
                 cacheNotice = cacheStatus == null ? null : cacheStatus.Notice,
                 error = lastFailure
             };

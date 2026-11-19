@@ -40,7 +40,7 @@
   </header>
   <section class="card" aria-label="更新状态">
     <h2 id="heading" aria-live="polite">连接更新器…</h2>
-    <div class="versions"><div><div class="version-label">当前版本</div><div id="current" class="version">—</div></div><span class="arrow" aria-hidden="true">→</span><div class="target"><div class="version-label">离线可安装版本</div><div id="target" class="version">—</div></div></div>
+    <div class="versions"><div><div class="version-label">当前版本</div><div id="current" class="version">—</div></div><span class="arrow" aria-hidden="true">→</span><div class="target"><div id="targetLabel" class="version-label">可安装版本</div><div id="target" class="version">—</div></div></div>
     <p id="storePublished" class="detail" hidden></p>
     <div id="progressBlock" class="progress-block" hidden>
       <div class="progress-info"><span id="phase" class="progress-title">准备中</span><button id="cancel" class="cancel" hidden>取消</button><span id="percent" class="percent"></span></div>
@@ -68,7 +68,7 @@
 </main>
 <script>
 (() => {
-  const ids = ['refresh','heading','current','target','storePublished','latest','latestLabel','backendLabel','backend','availabilityNotice','candidateNotice','cacheSummary','cacheNotice','progressBlock','phase','cancel','percent','track','fill','transfer','detail','attention','readyNote','error','officialDiagnostic','guardAvailability','actions','primary','openFolder','option','auto','autoNote','more','moreLabel'];
+  const ids = ['refresh','heading','current','target','targetLabel','storePublished','latest','latestLabel','backendLabel','backend','availabilityNotice','candidateNotice','cacheSummary','cacheNotice','progressBlock','phase','cancel','percent','track','fill','transfer','detail','attention','readyNote','error','officialDiagnostic','guardAvailability','actions','primary','openFolder','option','auto','autoNote','more','moreLabel'];
   const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
   const pending = new Map();
   let nextId = 1, sequence = 0, appliedSequence = 0, timer;
@@ -117,14 +117,17 @@
   }
   function render() {
     const s = state, busy = !!s?.busy, cached = s?.cacheState === 'complete', partial = s?.cacheState === 'partial';
-    const resumable = partial && s?.canDownload && !s.upToDate;
-    const titles = {idle:'检查更新',checking:'检查更新…',diagnosing:'核对官方更新…',available:cached ? '安装包已下载' : '有可用更新',downloading:'准备更新…',ready:'更新已就绪',installing:'应用更新…',current:'暂无可用离线更新',external:s?.externalUpdateTitle,unavailable:'暂无安装包',error:'更新未完成'};
+    const external = s?.state === 'external', observing = s?.state === 'officialTransfer' && !!s.officialTransferSize;
+    const resumable = partial && s?.canDownload && !s.upToDate && !observing;
+    const titles = {idle:'检查更新',checking:'检查更新…',diagnosing:'核对官方更新…',available:cached ? '安装包已下载' : '有可用更新',officialTransfer:observing ? '发现 Codex 下载' : 'Codex 下载待核验',downloading:'准备更新…',ready:s?.systemUpdate ? '官方更新已下载' : '更新已就绪',installing:'应用更新…',updated:'更新完成',current:'暂无可用更新包',external:s?.externalUpdateTitle,unavailable:'暂无安装包',error:'更新未完成'};
     el.heading.textContent = s ? titles[s.state] || '更新状态' : connectionError ? '连接未完成' : '连接更新器…';
     el.current.textContent = s?.currentVersion || '—';
-    // 主视图只显示实际目标；其他渠道公布的版本放在详情中。
-    el.target.textContent = s?.preparedVersion || s?.availableVersion || (s?.ready ? '待复核' : busy ? '查询中…' : s?.checkedVersion ? '暂无' : '—');
-    el.storePublished.hidden = s?.state !== 'external' || !s.newerStoreVersion;
-    el.storePublished.textContent = el.storePublished.hidden ? '' : 'Store 发布版本 ' + s.newerStoreVersion;
+    el.targetLabel.textContent = external ? '已公布版本' : '可安装版本';
+    if (external) el.target.textContent = s.newerStoreVersion || '未提供包号';
+    else if (s?.canFollowOfficial && !s.canDownload) el.target.textContent = '待核验';
+    else el.target.textContent = s?.preparedVersion || s?.availableVersion || (s?.systemUpdate ? '系统未提供包号' : s?.ready ? '待复核' : busy ? '查询中…' : s?.checkedVersion ? '暂无' : '—');
+    el.storePublished.hidden = !external;
+    el.storePublished.textContent = external ? (s.currentUserUpdateSupported ? s.storeIssue || '本机还没有可用的更新包。' : '当前后台是旧版，尚不能读取系统下载。') : '';
     el.latest.textContent = s?.latestVersion || '—';
     el.latestLabel.textContent = s?.latestVersionLabel || '已公布版本';
     el.backend.textContent = s?.helperVersion ? 'v' + s.helperVersion : '';
@@ -136,19 +139,20 @@
     el.cacheSummary.textContent = s?.ready ? '已校验，等待应用' : s?.cacheSummary || '—';
     el.cacheNotice.textContent = s?.cacheNotice || '';
     el.cacheNotice.hidden = !s?.cacheNotice;
-    el.progressBlock.hidden = !s || s.ready || (!busy && !resumable);
-    el.phase.textContent = busy ? s?.phase || '处理中' : '已下载';
+    el.progressBlock.hidden = !s || s.ready || (!busy && !resumable && !observing);
+    el.phase.textContent = observing ? 'Codex 已写入 ' + s.officialTransferSize : busy ? s?.phase || '处理中' : '已下载';
     el.detail.textContent = s?.detail || '';
     el.detail.hidden = !s?.detail || s.detail === s.error;
     const transfer = s?.state === 'downloading' && /(?:KB|MB|GB)\b/i.test(s.detail || '') ? s.detail : !busy && resumable ? s.cacheSummary : '';
     el.transfer.textContent = transfer;
     el.transfer.hidden = !transfer;
-    const percentage = s?.percent;
-    el.track.classList.toggle('indeterminate', busy && (percentage == null || percentage < 0));
+    const percentage = observing ? -1 : s?.percent;
+    el.track.classList.toggle('indeterminate', (observing || busy) && (percentage == null || percentage < 0));
     el.fill.style.width = Math.max(0,Math.min(100,percentage || 0)) + '%';
     el.percent.textContent = percentage >= 0 ? percentage + '%' : '';
     if (percentage >= 0) el.track.setAttribute('aria-valuenow', percentage); else el.track.removeAttribute('aria-valuenow');
     el.cancel.hidden = !s?.canCancel; el.cancel.disabled = commandPending;
+    el.cancel.textContent = s?.phase === '跟随 Codex 下载' ? '停止等待' : '取消';
     const problem = String(connectionError || s?.error || '');
     el.error.hidden = !problem; el.error.textContent = problem;
     const shortProblem = problem.split(/[。！？\r\n]/)[0];
@@ -159,12 +163,17 @@
     el.officialDiagnostic.hidden = !s?.diagnosticMessage;
     el.officialDiagnostic.textContent = s?.diagnosticMessage || '';
     el.guardAvailability.hidden = !s || s.officialCheckSupported === true;
-    el.actions.hidden = busy;
-    el.primary.textContent = !connected ? '重新连接' : !s ? '正在连接…' : s.ready ? s.error ? '重试应用并重启' : '应用更新并重启' : s.state === 'external' ? '重新检查离线包' : s.upToDate || s.state === 'unavailable' ? '重新检查' : s.canDownload ? cached ? '校验并准备' : partial ? '继续下载' : s.error ? '重试下载' : '下载更新' : '检查更新';
-    el.primary.disabled = commandPending || (connected && (!s || busy));
+    el.actions.hidden = busy || (connected && external);
+    if (!connected) el.primary.textContent = '重新连接';
+    else if (!s) el.primary.textContent = '正在连接…';
+    else if (s.ready) el.primary.textContent = s.error ? '重试应用并重启' : '应用更新并重启';
+    else if (s.canFollowOfficial) el.primary.textContent = s.officialTransferSize ? '跟随 Codex 下载' : '校验 Codex 下载';
+    else if (s.canDownload) el.primary.textContent = cached ? '校验并准备' : partial ? '继续下载' : s.error ? '重试下载' : '下载更新';
+    else el.primary.textContent = s.upToDate || s.state === 'unavailable' ? '重新检查' : '检查更新';
+    el.primary.disabled = commandPending || (connected && (!s || busy || external));
     el.refresh.disabled = !connected || commandPending || busy;
     el.openFolder.disabled = !connected || commandPending;
-    el.option.hidden = !!s && (s.ready || s.upToDate || (!s.canDownload && s.state !== 'downloading'));
+    el.option.hidden = !!s && (s.ready || s.upToDate || (!s.canFollowOfficial && !s.canDownload && s.state !== 'downloading'));
     el.auto.disabled = !connected || commandPending || (busy && s.state !== 'downloading');
     el.autoNote.hidden = el.option.hidden || !el.auto.checked;
   }
@@ -197,8 +206,8 @@
   el.primary.addEventListener('click', () => {
     if (!connected) { connect(); return; }
     if (state?.ready) perform('apply_update');
-    else if (!state?.canDownload || state.upToDate) perform('check_updates');
-    else perform('download_update', {autoInstall:el.auto.checked});
+    else if (state?.canFollowOfficial || (state?.canDownload && !state.upToDate)) perform('download_update', {autoInstall:el.auto.checked});
+    else if (state?.state !== 'external') perform('check_updates');
   });
   el.refresh.addEventListener('click', () => perform('check_updates'));
   el.openFolder.addEventListener('click', () => perform('open_updater_folder'));

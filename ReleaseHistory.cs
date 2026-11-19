@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security;
@@ -37,15 +38,27 @@ namespace ChatGPTInstaller
                 if (new FileInfo(path).Length > 256 * 1024) throw new InvalidDataException("版本记录超过预期大小。");
                 foreach (string line in File.ReadLines(path))
                 {
-                    string[] fields = line.Split(new[] { '\t' }, 2);
+                    string[] fields = line.Split('\t');
+                    if (fields.Length != 1 && fields.Length != 2 && fields.Length != 4) continue;
                     Version version;
                     if (!ReleaseManifest.TryVersion(fields[0], out version)) continue;
                     var release = ReleaseInfo.ForVersion(version, architecture);
-                    if (fields.Length == 2)
+                    if (fields.Length >= 2)
                     {
                         Uri url;
                         if (!Uri.TryCreate(fields[1], UriKind.Absolute, out url) || !ReleaseFeed.IsPackageUrl(url)) continue;
                         release.PackageUrl = url;
+                    }
+                    if (fields.Length == 4)
+                    {
+                        long length;
+                        if (fields[2].Length != 0)
+                        {
+                            if (!long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out length)) continue;
+                            release.DeclaredLength = length;
+                        }
+                        release.Sha256 = fields[3].Length == 0 ? null : fields[3];
+                        if (!ReleaseManifest.ValidIntegrity(release.DeclaredLength, release.Sha256)) continue;
                     }
                     versions.Add(release);
                 }
@@ -66,19 +79,26 @@ namespace ChatGPTInstaller
 
         public static void Remember(ReleaseInfo release, RunLog log)
         {
+            if (release.PackageUrl == null || !string.IsNullOrEmpty(release.PackageUrl.Query)) return;
             string temporary = null;
             try
             {
                 List<ReleaseInfo> versions;
                 // 无法完整读取时保留原文件，不用本次单条记录覆盖此前候选。
                 if (!TryRead(release.Architecture, log, out versions)) return;
-                if (versions.Any(v => v.Version == release.Version && v.PackageUrl == release.PackageUrl)) return;
+                var previous = versions.FirstOrDefault(v => v.Version == release.Version && v.PackageUrl == release.PackageUrl);
+                if (previous != null)
+                {
+                    if ((!release.DeclaredLength.HasValue && release.Sha256 == null) ||
+                        (previous.DeclaredLength == release.DeclaredLength && string.Equals(previous.Sha256, release.Sha256, StringComparison.OrdinalIgnoreCase))) return;
+                    versions.RemoveAll(v => v.Version == release.Version && v.PackageUrl == release.PackageUrl);
+                }
                 versions.Add(release);
                 Directory.CreateDirectory(Paths.Root);
                 string path = FilePath(release.Architecture);
                 temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 File.WriteAllLines(temporary, versions.GroupBy(v => v.Version + "\t" + v.PackageUrl.AbsoluteUri).Select(g => g.First())
-                    .OrderByDescending(v => v.Version).Select(v => v.Version + "\t" + v.PackageUrl.AbsoluteUri));
+                    .OrderByDescending(v => v.Version).Select(Format));
                 CacheFiles.Publish(temporary, path);
             }
             catch (Exception ex)
@@ -87,6 +107,13 @@ namespace ChatGPTInstaller
                 log.Write("未能保存本机版本候选，不影响本次在线检查：" + ex.Message);
             }
             finally { if (temporary != null) Paths.DeleteFile(temporary); }
+        }
+
+        private static string Format(ReleaseInfo release)
+        {
+            string line = release.Version + "\t" + release.PackageUrl.AbsoluteUri;
+            if (!release.DeclaredLength.HasValue && release.Sha256 == null) return line;
+            return line + "\t" + (release.DeclaredLength.HasValue ? release.DeclaredLength.Value.ToString(CultureInfo.InvariantCulture) : "") + "\t" + release.Sha256;
         }
 
         private static bool IsFileError(Exception ex)
